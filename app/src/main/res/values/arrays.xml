@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string-array name="xposed_scope">
+        <item>com.netease.cloudmusic</item>
+        <item>com.hihonor.cloudmusic</item>
+        <item>com.tencent.qqmusic</item>
+        <item>com.tencent.minihd.qqmusic</item>
+        <item>com.apple.android.music</item>
+        <item>com.kugou.android</item>
+        <item>com.kugou.android.lite</item>
+        <item>cn.kuwo.player</item>
+        <item>cn.toside.music.mobile</item>
+        <item>com.ikunshare.music.mobile</item>
+        <item>com.lxnetease.music.mobile</item>
+        <item>com.luna.music</item>
+        <item>com.salt.music</item>
+        <item>com.spotify.music</item>
+        <item>app.symfonik.music.player</item>
+        <item>org.akanework.gramophone</item>
+        <item>fun.upup.musicfree</item>
+    </string-array>
+
+    <string-array name="lyricon_module_tags">
+        <item>$syllable</item>
+        <item>$translation</item>
+    </string-array>
+</resources>

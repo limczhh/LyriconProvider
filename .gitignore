@@ -1,0 +1,26 @@
+# Built outputs
+*.iml
+.gradle
+/build
+/app/build
+/captures
+.externalNativeBuild
+.cxx
+
+# IDE
+/.idea
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local config
+/local.properties
+local.properties
+
+# Signing
+*.jks
+*.keystore
+
+# Temp workspace
+/temp
