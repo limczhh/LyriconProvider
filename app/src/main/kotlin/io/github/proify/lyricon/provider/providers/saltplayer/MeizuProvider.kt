@@ -27,6 +27,7 @@ open class MeizuProvider(
     private companion object {
         private const val FLAG_MEIZU_TICKER = 0x1000000 or 0x2000000
         private const val TAG = "SaltPlayerProvider"
+        private const val NATIVE_LYRIC_MIN_VERSION = 2026081001L
     }
 
     private val provider: LyriconProvider by lazy {
@@ -40,6 +41,17 @@ open class MeizuProvider(
 
     override fun onHook() {
         YLog.debug("Hooking processName: $processName")
+
+        val versionCode = try {
+            appContext?.packageManager?.getPackageInfo(appContext!!.packageName, 0)
+                ?.longVersionCode ?: 0L
+        } catch (_: Exception) { 0L }
+
+        if (versionCode >= NATIVE_LYRIC_MIN_VERSION) {
+            YLog.info(tag = TAG, msg = "Salt Player v$versionCode natively supports lyrics, skipping hook")
+            return
+        }
+
         Flyme.mock(appClassLoader!!)
 
         onAppLifecycle {

@@ -25,5 +25,6 @@
     <string-array name="lyricon_module_tags">
         <item>$syllable</item>
         <item>$translation</item>
+        <item>Lyricon Central</item>
     </string-array>
 </resources>

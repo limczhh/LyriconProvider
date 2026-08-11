@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Lyricon Provider</string>
-    <string name="xposed_description">状态栏歌词 聚合歌词提供者模块</string>
+    <string name="xposed_description">词幕歌词提供器聚合版，内置词幕 API 服务</string>
     <string name="lyricon_module_description">词幕歌词提供器的大杂烩版本</string>
 </resources>
