@@ -21,6 +21,7 @@ import io.github.proify.lyricon.provider.providers.lxmusic.variant.lxnetease.LxN
 import io.github.proify.lyricon.provider.providers.lxmusic.variant.main.LXMusic
 import io.github.proify.lyricon.provider.providers.musicfree.MusicFree
 import io.github.proify.lyricon.provider.providers.netease.CloudMusic
+import io.github.proify.lyricon.provider.providers.poweramp.PowerAmp
 import io.github.proify.lyricon.provider.providers.netease.Constants as NeteaseConstants
 import io.github.proify.lyricon.provider.providers.qishui.QiShui
 import io.github.proify.lyricon.provider.providers.qqmusic.QQMusic
@@ -65,6 +66,9 @@ open class HookEntry : IYukiHookXposedInit {
 
             // 汽水音乐
             loadApp("com.luna.music", QiShui)
+
+            // PowerAmp
+            loadApp("com.maxmpz.audioplayer", PowerAmp)
 
             // 椒盐音乐 (Salt Player)
             loadApp(SaltConstants.SALT_PLAYER_PACKAGE_NAME, SaltPlayer)
