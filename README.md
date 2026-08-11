@@ -15,7 +15,7 @@
 > - 统一项目结构，合并 parsers/utils 到单一模块内
 
 ![Platform](https://img.shields.io/badge/Platform-Android-brightgreen?style=flat&logo=android)
-![License](https://img.shields.io/github/license/limczhh/LyriconProvider?style=flat)
+![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg?style=flat)
 
 ## 功能特性
 
