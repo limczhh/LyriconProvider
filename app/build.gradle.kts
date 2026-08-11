@@ -10,6 +10,7 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.ksp)
     kotlin("plugin.serialization") version "2.1.21"
+    id("kotlin-parcelize")
 }
 
 configure<ApplicationExtension> {
@@ -63,6 +64,7 @@ configure<ApplicationExtension> {
 
     buildFeatures {
         buildConfig = true
+        aidl = true
     }
 }
 
@@ -81,6 +83,7 @@ dependencies {
     implementation(libs.okhttp)
     implementation(libs.okhttp.brotli)
     implementation(libs.taglib)
+    implementation(libs.kotlinx.coroutines.core)
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.appcompat)

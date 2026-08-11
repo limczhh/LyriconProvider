@@ -10,6 +10,7 @@ import com.highcapable.yukihookapi.YukiHookAPI
 import com.highcapable.yukihookapi.annotation.xposed.InjectYukiHookWithXposed
 import com.highcapable.yukihookapi.hook.xposed.proxy.IYukiHookXposedInit
 
+import io.github.proify.lyricon.provider.hooker.SystemUIHooker
 import io.github.proify.lyricon.provider.providers.applemusic.Apple
 import io.github.proify.lyricon.provider.providers.applemusic.Constants as AppleConstants
 import io.github.proify.lyricon.provider.providers.gramophone.Gramophone
@@ -39,6 +40,9 @@ open class HookEntry : IYukiHookXposedInit {
 
     override fun onHook() {
         YukiHookAPI.encase {
+            // System UI - 中央桥接
+            loadApp("com.android.systemui", SystemUIHooker)
+
             // 网易云音乐 / 荣耀音乐
             loadApp(NeteaseConstants.MUSIC_PACKAGE_NAME, CloudMusic)
             loadApp(NeteaseConstants.HONOR_MUSIC_PACKAGE_NAME, CloudMusic)
