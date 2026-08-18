@@ -2,10 +2,9 @@ package io.github.proify.lyricon.provider.providers.qishui
 
 import android.media.MediaMetadata
 import android.media.session.PlaybackState
-import com.highcapable.kavaref.KavaRef.Companion.resolve
-import com.highcapable.yukihookapi.hook.entity.YukiBaseHooker
-import com.highcapable.yukihookapi.hook.log.YLog
+import android.util.Log
 import io.github.proify.lyricon.lyric.model.Song
+import io.github.proify.lyricon.provider.BaseHooker
 import io.github.proify.lyricon.provider.LyriconFactory
 import io.github.proify.lyricon.provider.LyriconProvider
 import io.github.proify.lyricon.provider.ProviderLogo
@@ -16,8 +15,9 @@ import io.github.proify.lyricon.provider.utils.extensions.md5
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.json.decodeFromStream
 import java.io.File
+import java.util.concurrent.ConcurrentHashMap
 
-object QiShui : YukiBaseHooker() {
+object QiShui : BaseHooker() {
 
     private const val TAG = "QiShui"
     private var provider: LyriconProvider? = null
@@ -25,27 +25,116 @@ object QiShui : YukiBaseHooker() {
     private var curMediaId: String? = null
     private var lastSong: Song? = null
 
+    /** 从 RemoteControl 捕获的元数据，比 MediaSession 更准确（蓝牙歌词不会覆写） */
+    private val capturedMetadata = ConcurrentHashMap<String, CapturedTrack>()
+
+    private data class CapturedTrack(
+        val songId: String,
+        val name: String,
+        val artist: String,
+        val album: String = ""
+    )
+
     override fun onHook() {
-        YLog.info(tag = TAG, msg = "$packageName/$processName")
+        Log.i(TAG, "$packageName/$processName")
 
-        onAppLifecycle {
-            onCreate {
-                hook()
+        hookRemoteControls()
+
+        onAppCreate {
+            initProvider()
+            hookMediaSession()
+        }
+    }
+
+    // ========================= RemoteControl Hooks =========================
+
+    /**
+     * Hook 汽水的 RemoteControl 子类，在 MediaMetadataCompat 构建前捕获 IPlayable。
+     * 解决蓝牙歌词场景下 MediaSession TITLE 被覆写为当前歌词行的问题。
+     */
+    private fun hookRemoteControls() {
+        try {
+            val contextClass = Class.forName(
+                "com.luna.biz.playing.player.remote.control.RemoteControlContext",
+                false, appClassLoader
+            )
+            val playableClass = Class.forName(
+                "com.luna.common.player.queue.api.IPlayable",
+                false, appClassLoader
+            )
+            val builderClass = Class.forName(
+                "android.support.v4.media.MediaMetadataCompat\$Builder",
+                false, appClassLoader
+            )
+
+            val classNames = listOf(
+                "com.luna.biz.playing.player.remote.control.RemoteControl",
+                "com.luna.biz.playing.player.remote.control.CoreRemoteControl",
+                "com.luna.biz.playing.player.remote.control.BlueToothLyricsRemoteControl",
+                "com.luna.biz.playing.player.remote.control.FloatLyricRemoteControl",
+                "com.luna.biz.playing.player.remote.control.HarmonyRemoteControl",
+                "com.luna.biz.playing.player.remote.control.VivoOriginRemoteControl"
+            )
+            var hookedCount = 0
+
+            for (className in classNames) {
+                val remoteClass = try {
+                    Class.forName(className, false, appClassLoader)
+                } catch (_: ClassNotFoundException) {
+                    continue
+                }
+
+                val updateMethod = remoteClass.declaredMethods.firstOrNull { method ->
+                    method.parameterTypes.size == 2 &&
+                            method.parameterTypes[0] == contextClass &&
+                            method.parameterTypes[1] == builderClass &&
+                            method.returnType == builderClass
+                } ?: continue
+
+                module.deoptimize(updateMethod)
+                module.hook(updateMethod).intercept { chain ->
+                    try {
+                        val context = chain.getArg(0)
+                        val playable = context?.let { findPlayable(it, playableClass) }
+                        if (playable != null) capturePlayable(playable)
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Capture playable metadata failed", e)
+                    }
+                    chain.proceed()
+                }
+                hookedCount++
+                Log.i(TAG, "Hooked RemoteControl: ${remoteClass.simpleName}")
             }
+
+            if (hookedCount == 0) {
+                Log.w(TAG, "No RemoteControl subclass found")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Hook RemoteControl failed", e)
         }
     }
 
-    private var hooked = false
-    private fun hook() {
-        if (hooked) {
-            YLog.info(tag = TAG, msg = "何意味")
-            return
-        }
-        hooked = true
-
-        initProvider()
-        hookMediaSession()
+    private fun findPlayable(context: Any, playableClass: Class<*>): Any? {
+        val getter = context.javaClass.methods.firstOrNull { method ->
+            method.parameterTypes.isEmpty() && playableClass.isAssignableFrom(method.returnType)
+        } ?: return null
+        getter.isAccessible = true
+        return getter.invoke(context)
     }
+
+    private fun capturePlayable(playable: Any) {
+        val songId = stringValue(invokeGetter(playable, "getPlayableId"))
+        val songName = stringValue(invokeGetter(playable, "getName"))
+        if (songId.isBlank() || songName.isBlank()) return
+
+        val artist = joinNames(invokeGetter(playable, "getAuthorNames"))
+            .ifBlank { stringValue(invokeGetter(playable, "getNotificationContent")) }
+        val album = stringValue(invokeGetter(playable, "getMediaSessionSubTitle"))
+
+        capturedMetadata[songId] = CapturedTrack(songId, songName, artist, album)
+    }
+
+    // ========================= Provider Init =========================
 
     private fun initProvider() {
         val context = appContext ?: return
@@ -59,41 +148,35 @@ object QiShui : YukiBaseHooker() {
             player.setDisplayTranslation(true)
             register()
         }
-        YLog.debug(tag = TAG, msg = "provider registered, provider=${provider?.providerInfo}")
+        Log.d(TAG, "provider registered, provider=${provider?.providerInfo}")
     }
+
+    // ========================= MediaSession Hooks =========================
 
     private fun hookMediaSession() {
-        "android.media.session.MediaSession".toClass()
-            .resolve()
-            .apply {
-                firstMethod {
-                    name = "setPlaybackState"
-                    parameters(PlaybackState::class.java)
-                }.hook {
-                    after {
-                        val state = args[0] as? PlaybackState
-                        provider?.player?.setPlaybackState(state)
-                        updateSongIfNeed()
-                    }
-                }
+        val sessionClass = "android.media.session.MediaSession".toClass()
 
-                firstMethod {
-                    name = "setMetadata"
-                    parameters("android.media.MediaMetadata")
-                }.hook {
-                    after {
-                        val mediaMetadata = args[0] as? MediaMetadata ?: return@after
-                        val id = mediaMetadata.getString(MediaMetadata.METADATA_KEY_MEDIA_ID)
+        val setPlaybackState = sessionClass.getDeclaredMethod("setPlaybackState", PlaybackState::class.java)
+        setPlaybackState.hookAfter {
+            val state = args[0] as? PlaybackState
+            provider?.player?.setPlaybackState(state)
+            updateSongIfNeed()
+        }
 
-                        if (curMediaId == id) return@after
+        val setMetadata = sessionClass.getDeclaredMethod("setMetadata", MediaMetadata::class.java)
+        setMetadata.hookAfter {
+            val mediaMetadata = args[0] as? MediaMetadata ?: return@hookAfter
+            val id = mediaMetadata.getString(MediaMetadata.METADATA_KEY_MEDIA_ID)
 
-                        curMediaId = id
-                        MetadataCache.save(mediaMetadata)
-                        updateSong()
-                    }
-                }
-            }
+            if (curMediaId == id) return@hookAfter
+
+            curMediaId = id
+            MetadataCache.save(mediaMetadata)
+            updateSong()
+        }
     }
+
+    // ========================= Song Update =========================
 
     private fun updateSongIfNeed() {
         if (curMediaId.isNullOrBlank()) return
@@ -113,12 +196,16 @@ object QiShui : YukiBaseHooker() {
                 }
             } else null
         }.onFailure {
-            YLog.error(tag = TAG, msg = "cache load failed, mediaId=$id, error=$it")
+            Log.e(TAG, "cache load failed, mediaId=$id, error=$it")
         }.getOrNull()
 
         if (cache == null) {
+            val captured = capturedMetadata[id]
             val metadata = MetadataCache.get(id)
-            setSong(Song(name = metadata?.title, artist = metadata?.artist))
+            setSong(Song(
+                name = captured?.name ?: metadata?.title,
+                artist = captured?.artist ?: metadata?.artist
+            ))
             return
         }
 
@@ -133,17 +220,22 @@ object QiShui : YukiBaseHooker() {
     }
 
     fun NetResponseCache.buildSong(id: String): Song {
+        val captured = capturedMetadata[id]
         val metadata = MetadataCache.get(id)
         return Song(
             id = id,
-            name = metadata?.title.orEmpty(),
-            artist = metadata?.artist.orEmpty(),
+            name = captured?.name ?: metadata?.title.orEmpty(),
+            artist = captured?.artist ?: metadata?.artist.orEmpty(),
             duration = metadata?.duration ?: 0L,
             lyrics = toRichLyric()
         )
     }
 
-    private val netCacheLoaderDir by lazy { appContext!!.cacheDir.resolve("NetCacheLoader") }
+    // ========================= Cache =========================
+
+    private val netCacheLoaderDir by lazy {
+        File(appInfo.dataDir, "cache/NetCacheLoader")
+    }
 
     fun getNetLyricCacheFile(id: String): File? {
         val fileName = calculateLyricCacheFileName(id)
@@ -162,10 +254,40 @@ object QiShui : YukiBaseHooker() {
             }
             targetFile
         }.onFailure {
-            YLog.error(tag = TAG, msg = "getNetLyricCacheFile failed, mediaId=$id, error=$it")
+            Log.e(TAG, "getNetLyricCacheFile failed, mediaId=$id, error=$it")
         }.getOrNull()
     }
 
     fun calculateLyricCacheFileName(id: String): String =
         "/luna/track_v2/$id".md5()
+
+    // ========================= Reflection Helpers =========================
+
+    private fun invokeGetter(target: Any?, methodName: String): Any? {
+        if (target == null) return null
+        return runCatching {
+            val method = target.javaClass.methods.firstOrNull {
+                it.name == methodName && it.parameterTypes.isEmpty()
+            } ?: return@runCatching null
+            method.isAccessible = true
+            method.invoke(target)
+        }.getOrNull()
+    }
+
+    private fun stringValue(value: Any?): String {
+        return value?.toString()?.trim().orEmpty()
+    }
+
+    private fun joinNames(value: Any?): String {
+        val iterable = value as? Iterable<*> ?: return ""
+        return iterable.mapNotNull { itemName(it).takeIf { name -> name.isNotBlank() } }
+            .joinToString(", ")
+    }
+
+    private fun itemName(value: Any?): String {
+        if (value == null) return ""
+        if (value is CharSequence) return value.toString().trim()
+        return stringValue(invokeGetter(value, "getName"))
+            .ifBlank { stringValue(invokeGetter(value, "getArtistName")) }
+    }
 }
