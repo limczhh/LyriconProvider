@@ -3,6 +3,8 @@
 .gradle
 /build
 /app/build
+/app/debug
+/app/release
 /captures
 .externalNativeBuild
 .cxx
@@ -21,6 +23,9 @@ local.properties
 # Signing
 *.jks
 *.keystore
+
+# Gradle daemon
+/gradle/gradle-daemon-jvm.properties
 
 # Temp workspace
 /temp
