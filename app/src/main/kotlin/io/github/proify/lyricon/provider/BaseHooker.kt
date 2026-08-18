@@ -93,15 +93,25 @@ abstract class BaseHooker {
     // --- Application 生命周期 ---
 
     fun onAppCreate(block: () -> Unit) {
+        val targetClassName = packageParam.applicationInfo.className ?: "android.app.Application"
         try {
-            val appClass = Class.forName("android.app.Application", false, appClassLoader)
-            val onCreateMethod = appClass.getDeclaredMethod("onCreate")
+            val targetClass = Class.forName(targetClassName, false, appClassLoader)
+            val onCreateMethod = targetClass.getDeclaredMethod("onCreate")
             module.hook(onCreateMethod).intercept { chain ->
                 chain.proceed()
                 block()
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to hook Application.onCreate", e)
+            Log.w(TAG, "Failed to hook $targetClassName.onCreate, fallback to Application", e)
+            try {
+                val onCreateMethod = Application::class.java.getDeclaredMethod("onCreate")
+                module.hook(onCreateMethod).intercept { chain ->
+                    chain.proceed()
+                    block()
+                }
+            } catch (e2: Exception) {
+                Log.e(TAG, "Failed to hook Application.onCreate (fallback)", e2)
+            }
         }
     }
 
