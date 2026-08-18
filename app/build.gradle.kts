@@ -6,9 +6,12 @@
 
 import com.android.build.api.dsl.ApplicationExtension
 
+val gitCommitCount = providers.exec {
+    commandLine("git", "rev-list", "--count", "HEAD")
+}.standardOutput.asText.get().trim().toIntOrNull() ?: 1
+
 plugins {
     alias(libs.plugins.android.application)
-    alias(libs.plugins.ksp)
     kotlin("plugin.serialization") version "2.1.21"
     id("kotlin-parcelize")
 }
@@ -21,7 +24,7 @@ configure<ApplicationExtension> {
         applicationId = "io.github.proify.lyricon.provider"
         minSdk = 28
         targetSdk = (rootProject.extra.get("targetSdkVersion") as Int)
-        versionCode = 1
+        versionCode = gitCommitCount
         versionName = "1.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -66,6 +69,12 @@ configure<ApplicationExtension> {
         buildConfig = true
         aidl = true
     }
+
+    packaging {
+        resources {
+            merges += "META-INF/xposed/*"
+        }
+    }
 }
 
 dependencies {
@@ -74,11 +83,8 @@ dependencies {
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.dexkit)
 
-    implementation(libs.yukihookapi.api)
-    implementation(libs.kavaref.core)
-    implementation(libs.kavaref.extension)
-    compileOnly(libs.xposed.api)
-    ksp(libs.yukihookapi.ksp.xposed)
+    compileOnly(libs.libxposed.api)
+    implementation(libs.libxposed.service)
 
     implementation(libs.okhttp)
     implementation(libs.okhttp.brotli)
