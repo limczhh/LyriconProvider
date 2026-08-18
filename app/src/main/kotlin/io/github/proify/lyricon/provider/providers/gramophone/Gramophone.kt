@@ -6,14 +6,11 @@
 
 package io.github.proify.lyricon.provider.providers.gramophone
 
-import android.content.Context
 import android.media.session.PlaybackState
 import android.net.Uri
-import com.highcapable.kavaref.KavaRef.Companion.resolve
-import com.highcapable.yukihookapi.hook.entity.YukiBaseHooker
-import com.highcapable.yukihookapi.hook.log.YLog
+import android.util.Log
 import com.kyant.taglib.TagLib
-import de.robv.android.xposed.XposedHelpers
+import io.github.proify.lyricon.provider.BaseHooker
 import io.github.proify.lyricon.provider.parsers.lrckit.EnhanceLrcParser
 import io.github.proify.lyricon.lyric.model.Song
 import io.github.proify.lyricon.provider.LyriconFactory
@@ -33,7 +30,7 @@ import kotlinx.coroutines.withContext
  * 该类负责拦截 Gramophone 的播放状态与轨道变化, 并将歌词元数据推送至 Lyricon 服务.
  * @property tag 日志标识符
  */
-open class Gramophone(val tag: String = "GramophoneProvider") : YukiBaseHooker() {
+open class Gramophone(val tag: String = "GramophoneProvider") : BaseHooker() {
 
     /** 匹配 ID3 标签中歌词字段的正则表达式 */
     private val lyricTagRegex by lazy { Regex("(?i)\\b(LYRICS)\\b") }
@@ -48,16 +45,10 @@ open class Gramophone(val tag: String = "GramophoneProvider") : YukiBaseHooker()
     private var trackProcessingJob: Job? = null
 
     override fun onHook() {
-        YLog.debug(tag = tag, msg = "Starting Gramophone hook integration...")
+        Log.d(tag, "Starting Gramophone hook integration...")
 
-        onAppLifecycle {
-            onCreate {
-                initProvider(this)
-            }
-            onTerminate {
-                provider?.unregister()
-                scope.cancel()
-            }
+        onAppCreate {
+            initProvider()
         }
 
         hookMediaSession()
@@ -70,17 +61,12 @@ open class Gramophone(val tag: String = "GramophoneProvider") : YukiBaseHooker()
      * 参考 https://github.com/FoedusProgramme/Gramophone/blob/c1c52f5f08cc95f9c6b22d33a962e685125c9aba/app/src/main/java/org/akanework/gramophone/logic/GramophonePlaybackService.kt#L979
      */
     private fun hookGramophoneService() {
-        "org.akanework.gramophone.logic.GramophonePlaybackService".toClass().resolve().apply {
-            // 钩入轨道变化方法
-            firstMethod {
-                name = "onTracksChanged"
-                parameters("androidx.media3.common.Tracks".toClass())
-            }.hook {
-                after {
-                    processMediaItemChange(instance)
-                }
+        val serviceClass = "org.akanework.gramophone.logic.GramophonePlaybackService".toClass()
+        val tracksClass = "androidx.media3.common.Tracks".toClass()
+        serviceClass.getDeclaredMethod("onTracksChanged", tracksClass)
+            .hookAfter {
+                processMediaItemChange(instance)
             }
-        }
     }
 
     /**
@@ -90,26 +76,26 @@ open class Gramophone(val tag: String = "GramophoneProvider") : YukiBaseHooker()
     private fun processMediaItemChange(serviceInstance: Any) {
         try {
             // 1. 获取 controller
-            val controller = XposedHelpers.getObjectField(serviceInstance, "controller") ?: return
+            val controller = serviceInstance.getField("controller") ?: return
 
             // 2. 获取当前 MediaItem (androidx.media3.common.MediaItem)
-            val mediaItem = XposedHelpers.callMethod(controller, "getCurrentMediaItem") ?: return
+            val mediaItem = controller.callMethod("getCurrentMediaItem") ?: return
 
             // 3. 提取元数据
-            val mediaId = XposedHelpers.getObjectField(mediaItem, "mediaId") as? String
-            val localConfig = XposedHelpers.getObjectField(mediaItem, "localConfiguration")
-            val uri = XposedHelpers.getObjectField(localConfig, "uri") as? Uri ?: return
+            val mediaId = mediaItem.getField("mediaId") as? String
+            val localConfig = mediaItem.getField("localConfiguration")
+            val uri = localConfig?.getField("uri") as? Uri ?: return
 
-            val metadata = XposedHelpers.getObjectField(mediaItem, "mediaMetadata")
-            val title = XposedHelpers.getObjectField(metadata, "title")?.toString()
-            val artist = XposedHelpers.getObjectField(metadata, "artist")?.toString()
-            val durationMs = XposedHelpers.getObjectField(metadata, "durationMs") as? Long ?: 0L
+            val metadata = mediaItem.getField("mediaMetadata")
+            val title = metadata?.getField("title")?.toString()
+            val artist = metadata?.getField("artist")?.toString()
+            val durationMs = metadata?.getField("durationMs") as? Long ?: 0L
 
             // 4. 触发异步解析
             executeAsyncTrackUpdate(uri, title, artist, durationMs, mediaId)
 
         } catch (e: Throwable) {
-            YLog.error(tag = tag, msg = "Failed to extract MediaItem metadata", e = e)
+            Log.e(tag, "Failed to extract MediaItem metadata", e)
         }
     }
 
@@ -155,7 +141,7 @@ open class Gramophone(val tag: String = "GramophoneProvider") : YukiBaseHooker()
 
         provider?.player?.setSong(song)
 
-        YLog.debug(tag = tag, msg = "Track updated: $title - $artist [$mediaId]")
+        Log.d(tag, "Track updated: $title - $artist [$mediaId]")
     }
 
     /**
@@ -172,15 +158,15 @@ open class Gramophone(val tag: String = "GramophoneProvider") : YukiBaseHooker()
             }
         }
     } catch (e: Exception) {
-        YLog.error(tag = tag, msg = "TagLib failed to read metadata from $uri", e = e)
+        Log.e(tag, "TagLib failed to read metadata from $uri", e)
         null
     }
 
     /**
      * 初始化 LyriconProvider.
-     * @param context 应用上下文
      */
-    private fun initProvider(context: Context) {
+    private fun initProvider() {
+        val context = appContext ?: return
         provider = LyriconFactory.createProvider(
             context = context,
             providerPackageName = Constants.PROVIDER_PACKAGE_NAME,
@@ -190,23 +176,18 @@ open class Gramophone(val tag: String = "GramophoneProvider") : YukiBaseHooker()
             player.setDisplayTranslation(true)
             register()
         }
-        YLog.debug(tag = tag, msg = "LyriconProvider initialized for ${context.packageName}")
+        Log.d(tag, "LyriconProvider initialized for ${context.packageName}")
     }
 
     /**
      * Hook 系统/应用级别的 MediaSession, 同步播放、暂停等状态.
      */
     private fun hookMediaSession() {
-        "android.media.session.MediaSession".toClass().resolve().apply {
-            firstMethod {
-                name = "setPlaybackState"
-                parameters(PlaybackState::class.java)
-            }.hook {
-                after {
-                    val state = args[0] as? PlaybackState
-                    provider?.player?.setPlaybackState(state)
-                }
+        val mediaSessionClass = "android.media.session.MediaSession".toClass()
+        mediaSessionClass.getDeclaredMethod("setPlaybackState", PlaybackState::class.java)
+            .hookAfter {
+                val state = args[0] as? PlaybackState
+                provider?.player?.setPlaybackState(state)
             }
-        }
     }
 }

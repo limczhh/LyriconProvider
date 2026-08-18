@@ -7,8 +7,7 @@
 package io.github.proify.lyricon.provider.providers.lxmusic.variant.main
 
 import android.util.Log
-import com.highcapable.kavaref.KavaRef.Companion.resolve
-import com.highcapable.yukihookapi.hook.entity.YukiBaseHooker
+import io.github.proify.lyricon.provider.BaseHooker
 import io.github.proify.lyricon.provider.providers.lxmusic.Constants
 import io.github.proify.lyricon.provider.providers.lxmusic.variant.main.Converter.toSong
 import io.github.proify.lyricon.provider.LyriconFactory
@@ -24,7 +23,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 open class LXMusic(private val lyricModuleClass: String = "cn.toside.music.mobile.lyric.LyricModule") :
-    YukiBaseHooker() {
+    BaseHooker() {
     private companion object {
         private const val TAG = "LXMusicHooker"
     }
@@ -50,60 +49,72 @@ open class LXMusic(private val lyricModuleClass: String = "cn.toside.music.mobil
     }
 
     override fun onHook() {
-        onAppLifecycle {
-            onCreate {
-                provider.register()
-                injectLyricModule()
-            }
+        onAppCreate {
+            provider.register()
+            injectLyricModule()
         }
     }
 
     private fun injectLyricModule() {
-        lyricModuleClass.toClassOrNull()
-            ?.resolve()
-            ?.apply {
-                firstMethod { name = "setLyric" }.hook {
-                    after {
-                        val lyric = args[0] as? String ?: ""
-                        val trans = args[1] as? String
-                        val roma = args[2] as? String
-                        updateLyric(lyric, trans, roma)
-                    }
-                }
+        val clazz = try { lyricModuleClass.toClass() } catch (_: ClassNotFoundException) { return }
 
-                firstMethod { name = "play" }.hook {
-                    after {
-                        val position = (args[0] as? Int ?: 0).toLong()
-                        handlePlay(position)
+        clazz.declaredMethods
+            .filter { it.name == "setLyric" }
+            .forEach { method ->
+                method.hookAfter {
+                    val lyric = args[0] as? String ?: ""
+                    val trans = args[1] as? String
+                    val roma = args[2] as? String
+                    updateLyric(lyric, trans, roma)
+                }
+            }
+
+        clazz.declaredMethods
+            .filter { it.name == "play" }
+            .forEach { method ->
+                method.hookAfter {
+                    val position = (args[0] as? Int ?: 0).toLong()
+                    handlePlay(position)
+                }
+            }
+
+        clazz.declaredMethods
+            .filter { it.name == "pause" }
+            .forEach { method ->
+                method.hookAfter {
+                    handlePause()
+                }
+            }
+
+        clazz.declaredMethods
+            .filter { it.name == "setPlaybackRate" }
+            .forEach { method ->
+                method.hookAfter {
+                    val rate = args[0] as? Float ?: 1f
+                    handleSpeedChange(rate)
+                }
+            }
+
+        clazz.declaredMethods
+            .filter { it.name == "toggleTranslation" }
+            .forEach { method ->
+                method.hookAfter {
+                    val enabled = args[0] as? Boolean ?: false
+                    if (enabled != isDisplayTranslation) {
+                        isDisplayTranslation = enabled
+                        provider.player.setDisplayTranslation(enabled)
                     }
                 }
-                firstMethod { name = "pause" }.hook {
-                    after {
-                        handlePause()
-                    }
-                }
-                firstMethod { name = "setPlaybackRate" }.hook {
-                    after {
-                        val rate = args[0] as? Float ?: 1f
-                        handleSpeedChange(rate)
-                    }
-                }
-                firstMethod { name = "toggleTranslation" }.hook {
-                    after {
-                        val enabled = args[0] as? Boolean ?: false
-                        if (enabled != isDisplayTranslation) {
-                            isDisplayTranslation = enabled
-                            provider.player.setDisplayTranslation(enabled)
-                        }
-                    }
-                }
-                firstMethod { name = "toggleRoma" }.hook {
-                    after {
-                        val enabled = args[0] as? Boolean ?: false
-                        if (enabled != isDisplayRoma) {
-                            isDisplayRoma = enabled
-                            provider.player.setDisplayRoma(enabled)
-                        }
+            }
+
+        clazz.declaredMethods
+            .filter { it.name == "toggleRoma" }
+            .forEach { method ->
+                method.hookAfter {
+                    val enabled = args[0] as? Boolean ?: false
+                    if (enabled != isDisplayRoma) {
+                        isDisplayRoma = enabled
+                        provider.player.setDisplayRoma(enabled)
                     }
                 }
             }

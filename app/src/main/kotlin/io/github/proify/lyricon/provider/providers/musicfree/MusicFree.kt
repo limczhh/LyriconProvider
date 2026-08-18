@@ -7,59 +7,47 @@
 package io.github.proify.lyricon.provider.providers.musicfree
 
 import android.media.session.PlaybackState
+import android.util.Log
 import android.view.View
 import android.widget.TextView
-import com.highcapable.kavaref.KavaRef.Companion.resolve
-import com.highcapable.yukihookapi.hook.entity.YukiBaseHooker
-import com.highcapable.yukihookapi.hook.log.YLog
-import de.robv.android.xposed.XC_MethodHook
-import de.robv.android.xposed.XposedHelpers
+import io.github.proify.lyricon.provider.BaseHooker
 import io.github.proify.lyricon.provider.utils.android.AndroidUtils
 import io.github.proify.lyricon.provider.LyriconFactory
 import io.github.proify.lyricon.provider.LyriconProvider
 import io.github.proify.lyricon.provider.ProviderLogo
 
-open class MusicFree(val tag: String = "MusicFreeProvider") : YukiBaseHooker() {
+open class MusicFree(val tag: String = "MusicFreeProvider") : BaseHooker() {
     private var provider: LyriconProvider? = null
 
     override fun onHook() {
-        AndroidUtils.openBluetoothA2dpOn(appClassLoader)
-        YLog.debug(tag = tag, msg = "进程: $processName")
+        AndroidUtils.openBluetoothA2dpOn(module, appClassLoader)
+        Log.d(tag, "进程: $processName")
 
-        onAppLifecycle {
-            onCreate {
-                initProvider()
-            }
+        onAppCreate {
+            initProvider()
         }
         hookMediaSession()
-        hook()
+        hookLyricView()
     }
 
-    private fun hook() {
-        XposedHelpers.findAndHookMethod(
-            "fun.upup.musicfree.lyricUtil.LyricView".toClass(),
-            "setText",
-            String::class.java,
-            object : XC_MethodHook() {
-                @Throws(Throwable::class)
-                override fun afterHookedMethod(param: MethodHookParam) {
-                    val ts = XposedHelpers.getObjectField(param.thisObject, "tv") as TextView
+    private fun hookLyricView() {
+        val lyricViewClass = "fun.upup.musicfree.lyricUtil.LyricView".toClass()
+        val setTextMethod = lyricViewClass.getDeclaredMethod("setText", String::class.java)
+        setTextMethod.hookAfter {
+            val tv = (instance.getField("tv") as? TextView) ?: return@hookAfter
+            val rootView = tv.rootView ?: return@hookAfter
+            rootView.visibility = View.GONE
+            rootView.alpha = 0f
 
-                    val rootView = ts.getRootView() ?: return
-                    rootView.visibility = View.GONE
-                    rootView.setAlpha(0f)
+            val text = args[0] as CharSequence
+            if (text.isBlank()) return@hookAfter
 
-                    val text = param.args[0] as CharSequence
+            val newText = text.lines().mapNotNull {
+                if (it.trim() == "//") null else it
+            }.joinToString("\n")
 
-                    if (text.isBlank()) return
-
-                    val newText = text.lines().mapNotNull {
-                        if (it.trim() == "//") null else it
-                    }.joinToString("\n")
-
-                    provider?.player?.sendText(newText)
-                }
-            })
+            provider?.player?.sendText(newText)
+        }
     }
 
     private fun initProvider() {
@@ -76,16 +64,11 @@ open class MusicFree(val tag: String = "MusicFreeProvider") : YukiBaseHooker() {
     }
 
     private fun hookMediaSession() {
-        "android.media.session.MediaSession".toClass().resolve().apply {
-            firstMethod {
-                name = "setPlaybackState"
-                parameters(PlaybackState::class.java)
-            }.hook {
-                after {
-                    val state = args[0] as? PlaybackState
-                    provider?.player?.setPlaybackState(state)
-                }
-            }
+        val sessionClass = "android.media.session.MediaSession".toClass()
+        val setPlaybackState = sessionClass.getDeclaredMethod("setPlaybackState", PlaybackState::class.java)
+        setPlaybackState.hookAfter {
+            val state = args[0] as? PlaybackState
+            provider?.player?.setPlaybackState(state)
         }
     }
 }

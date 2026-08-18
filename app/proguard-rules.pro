@@ -1,10 +1,10 @@
-# === Xposed / YukihookAPI ===
-# HookEntry 是模块入口，必须保留
--keep class io.github.proify.lyricon.provider.HookEntry { *; }
--keep class * extends com.highcapable.yukihookapi.hook.entity.YukiBaseHooker { *; }
--keep class com.highcapable.yukihookapi.** { *; }
--keepattributes RuntimeVisibleAnnotations
--keep @com.highcapable.yukihookapi.annotation.xposed.InjectYukiHookWithXposed class * { *; }
+# === Xposed / libxposed API 102 ===
+-dontwarn io.github.libxposed.annotation.**
+-adaptresourcefilecontents META-INF/xposed/java_init.list
+-keep,allowoptimization,allowobfuscation public class * extends io.github.libxposed.api.XposedModule {
+    public <init>();
+}
+-keep class org.luckypray.dexkit.** { *; }
 
 # === Provider 常量（包名、图标等运行时使用）===
 -keep class io.github.proify.lyricon.provider.providers.**.Constants { *; }
@@ -24,9 +24,6 @@
 -keep class io.github.proify.lyricon.provider.ProviderInfo { *; }
 -keep class io.github.proify.lyricon.subscriber.ProviderInfo { *; }
 -keep class io.github.proify.lyricon.lyric.model.Song { *; }
-
-# === KavaRef 反射库 ===
--dontwarn java.lang.reflect.AnnotatedType
 
 # === Kotlin 序列化 ===
 -keepattributes *Annotation*, InnerClasses

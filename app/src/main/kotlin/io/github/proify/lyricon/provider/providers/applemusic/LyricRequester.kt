@@ -7,13 +7,16 @@
 package io.github.proify.lyricon.provider.providers.applemusic
 
 import android.app.Application
-import com.highcapable.yukihookapi.hook.log.YLog
-import de.robv.android.xposed.XposedHelpers
+import android.util.Log
 
 class LyricRequester(
     private val classLoader: ClassLoader,
     private val application: Application
 ) {
+    private companion object {
+        private const val TAG = "LyricRequester"
+    }
+
     private var playerLyricsViewModel: Any? = null
 
     /**
@@ -23,14 +26,16 @@ class LyricRequester(
      */
     fun requestDownload(mediaId: String) {
         if (mediaId.isBlank()) {
-            YLog.debug("LyricRequester: mediaId is null or blank")
+            Log.d(TAG, "mediaId is null or blank")
             return
         }
         try {
-            val song =
-                XposedHelpers.newInstance(classLoader.loadClass("com.apple.android.music.model.Song"))
-            XposedHelpers.callMethod(song, "setId", mediaId)
-            XposedHelpers.callMethod(song, "setHasLyrics", true)
+            val songClass = classLoader.loadClass("com.apple.android.music.model.Song")
+            val song = songClass.getDeclaredConstructor().newInstance()
+            song.javaClass.methods.first { it.name == "setId" && it.parameterCount == 1 }
+                .invoke(song, mediaId)
+            song.javaClass.methods.first { it.name == "setHasLyrics" && it.parameterCount == 1 }
+                .invoke(song, true)
 
             if (playerLyricsViewModel == null) {
                 playerLyricsViewModel = classLoader
@@ -39,11 +44,13 @@ class LyricRequester(
                     .newInstance(application)
             }
 
-            XposedHelpers.callMethod(playerLyricsViewModel, "loadLyrics", song)
-            YLog.debug("LyricRequester: Triggered download for $mediaId")
+            playerLyricsViewModel!!.javaClass.methods
+                .first { it.name == "loadLyrics" && it.parameterCount == 1 }
+                .invoke(playerLyricsViewModel, song)
+            Log.d(TAG, "Triggered download for $mediaId")
 
         } catch (e: Exception) {
-            YLog.error("LyricRequester: Failed to trigger download", e)
+            Log.e(TAG, "Failed to trigger download", e)
         }
     }
 }

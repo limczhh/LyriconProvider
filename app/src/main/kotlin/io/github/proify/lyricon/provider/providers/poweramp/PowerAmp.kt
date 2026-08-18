@@ -12,10 +12,8 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.media.session.PlaybackState
 import android.net.Uri
+import android.util.Log
 import androidx.core.content.ContextCompat
-import com.highcapable.kavaref.KavaRef.Companion.resolve
-import com.highcapable.yukihookapi.hook.entity.YukiBaseHooker
-import com.highcapable.yukihookapi.hook.log.YLog
 import com.kyant.taglib.TagLib
 import io.github.proify.lyricon.provider.parsers.lrckit.EnhanceLrcParser
 import io.github.proify.lyricon.provider.providers.poweramp.util.SafUriResolver
@@ -23,8 +21,9 @@ import io.github.proify.lyricon.lyric.model.Song
 import io.github.proify.lyricon.provider.LyriconFactory
 import io.github.proify.lyricon.provider.LyriconProvider
 import io.github.proify.lyricon.provider.ProviderLogo
+import io.github.proify.lyricon.provider.BaseHooker
 
-object PowerAmp : YukiBaseHooker() {
+object PowerAmp : BaseHooker() {
     private const val TAG = "PowerAmpProvider"
     private const val ACTION_TRACK_CHANGED = "com.maxmpz.audioplayer.TRACK_CHANGED"
 
@@ -35,12 +34,10 @@ object PowerAmp : YukiBaseHooker() {
     private var currentMetadata: TrackMetadata? = null
 
     override fun onHook() {
-        onAppLifecycle {
-            onCreate {
-                setupLyriconProvider(this)
-                setupBroadcastReceiver(this)
-            }
-            onTerminate { release() }
+        onAppCreate {
+            val context = appContext ?: return@onAppCreate
+            setupLyriconProvider(context)
+            setupBroadcastReceiver(context)
         }
         hookMediaSession()
     }
@@ -71,19 +68,12 @@ object PowerAmp : YukiBaseHooker() {
     }
 
     private fun hookMediaSession() {
-        "android.media.session.MediaSession".toClass()
-            .resolve()
-            .apply {
-                firstMethod {
-                    name = "setPlaybackState"
-                    parameters(PlaybackState::class.java)
-                }.hook {
-                    after {
-                        val state = args[0] as? PlaybackState ?: return@after
-                        provider?.player?.setPlaybackState(state)
-                    }
-                }
-            }
+        val sessionClass = "android.media.session.MediaSession".toClass()
+        val setPlaybackState = sessionClass.getDeclaredMethod("setPlaybackState", PlaybackState::class.java)
+        setPlaybackState.hookAfter {
+            val state = args[0] as? PlaybackState ?: return@hookAfter
+            provider?.player?.setPlaybackState(state)
+        }
     }
 
     private fun handleTrackChange(intent: Intent) {
@@ -117,7 +107,7 @@ object PowerAmp : YukiBaseHooker() {
         )
 
         updateSong(song)
-        YLog.info(tag = TAG, msg = "Local lyric loaded for: ${data.title}")
+        Log.i(TAG, "Local lyric loaded for: ${data.title}")
         return true
     }
 
@@ -130,7 +120,7 @@ object PowerAmp : YukiBaseHooker() {
             }
         }
     } catch (e: Exception) {
-        YLog.error(tag = TAG, msg = "Failed to fetch lyric tag from $uri", e = e)
+        Log.e(TAG, "Failed to fetch lyric tag from $uri", e)
         null
     }
 
@@ -148,13 +138,13 @@ object PowerAmp : YukiBaseHooker() {
     }
 
     private fun updateSong(song: Song?) {
-        YLog.debug(tag = TAG, msg = "Updating song: id=${song?.id}, title=${song?.name}")
+        Log.d(TAG, "Updating song: id=${song?.id}, title=${song?.name}")
         provider?.player?.setSong(song)
     }
 
     private fun release() {
         trackReceiver?.let { appContext?.unregisterReceiver(it) }
         trackReceiver = null
-        YLog.info(tag = TAG, msg = "PowerAmp provider released")
+        Log.i(TAG, "PowerAmp provider released")
     }
 }

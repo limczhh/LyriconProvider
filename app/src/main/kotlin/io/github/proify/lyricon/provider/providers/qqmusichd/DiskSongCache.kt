@@ -7,7 +7,7 @@
 package io.github.proify.lyricon.provider.providers.qqmusichd
 
 import android.content.Context
-import com.highcapable.yukihookapi.hook.log.YLog
+import android.util.Log
 import io.github.proify.lyricon.provider.utils.extensions.deflate
 import io.github.proify.lyricon.provider.utils.extensions.inflate
 import io.github.proify.lyricon.provider.utils.extensions.json
@@ -50,7 +50,7 @@ object DiskSongCache {
             val decompressedBytes = cacheFile.readBytes().inflate()
             json.decodeFromStream<Song>(decompressedBytes.inputStream())
         }.onFailure { e ->
-            YLog.error("$TAG: Failed to load cache for $songId", e)
+            Log.e(TAG, "Failed to load cache for $songId", e)
         }.getOrNull()
     }
 
@@ -71,7 +71,7 @@ object DiskSongCache {
             }
             cacheFile.writeBytes(compressedData)
         }.onFailure { e ->
-            YLog.error("$TAG: Failed to save cache for ${song.id}", e)
+            Log.e(TAG, "Failed to save cache for ${song.id}", e)
         }
     }
 

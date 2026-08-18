@@ -15,9 +15,7 @@ import android.media.MediaMetadata
 import android.media.session.PlaybackState
 import android.util.Log
 import androidx.core.content.ContextCompat
-import com.highcapable.kavaref.KavaRef.Companion.resolve
-import com.highcapable.yukihookapi.hook.entity.YukiBaseHooker
-import com.highcapable.yukihookapi.hook.log.YLog
+import io.github.proify.lyricon.provider.BaseHooker
 import io.github.proify.lyricon.lyric.model.RichLyricLine
 import io.github.proify.lyricon.lyric.model.Song
 import io.github.proify.lyricon.lyric.model.lyricMetadataOf
@@ -26,7 +24,7 @@ import io.github.proify.lyricon.provider.LyriconProvider
 import io.github.proify.lyricon.provider.ProviderLogo
 import io.github.proify.lyricon.provider.parsers.qrckit.LyricResponse
 
-object QQMusic : YukiBaseHooker() {
+object QQMusic : BaseHooker() {
 
     private const val TAG = "Lyricon_QQMusic"
     private const val PKG_MAIN = "com.tencent.qqmusic"
@@ -42,7 +40,7 @@ object QQMusic : YukiBaseHooker() {
     private val playerProcessHook by lazy { PlayerProcessHook() }
 
     override fun onHook() {
-        val loader = appClassLoader ?: return
+        val loader = appClassLoader
         when (processName) {
             PKG_MAIN -> mainProcessHook.hook(loader)
             PKG_PLAYER_SERVICE -> playerProcessHook.hook(loader)
@@ -54,27 +52,22 @@ object QQMusic : YukiBaseHooker() {
      */
     private class MainProcessHook {
         fun hook(loader: ClassLoader) {
-            YLog.debug("Hooking Main Process: SharedPreferences interceptor")
+            Log.d(TAG, "Hooking Main Process: SharedPreferences interceptor")
 
-            $$"android.app.SharedPreferencesImpl$EditorImpl".toClass(loader)
-                .resolve()
-                .firstMethod {
-                    name = "putBoolean"
-                    parameters(String::class.java, Boolean::class.java)
-                }.hook {
-                    after {
-                        val key = args[0] as String
-                        val value = args[1] as Boolean
+            "android.app.SharedPreferencesImpl\$EditorImpl".toClass(loader)
+                .getDeclaredMethod("putBoolean", String::class.java, Boolean::class.javaPrimitiveType)
+                .hookAfter {
+                    val key = args[0] as String
+                    val value = args[1] as Boolean
 
-                        if (key == KEY_DISPLAY_TRANS || key == KEY_DISPLAY_ROMA) {
-                            val intent = Intent(ACTION_LYRIC_SETTINGS_CHANGED).apply {
-                                putExtra("setting_key", key)
-                                putExtra("setting_value", value)
-                                setPackage(appContext?.packageName)
-                            }
-                            appContext?.sendBroadcast(intent)
-                            Log.d(TAG, "Settings changed in main process: $key -> $value")
+                    if (key == KEY_DISPLAY_TRANS || key == KEY_DISPLAY_ROMA) {
+                        val intent = Intent(ACTION_LYRIC_SETTINGS_CHANGED).apply {
+                            putExtra("setting_key", key)
+                            putExtra("setting_value", value)
+                            setPackage(QQMusic.appContext?.packageName)
                         }
+                        QQMusic.appContext?.sendBroadcast(intent)
+                        Log.d(TAG, "Settings changed in main process: $key -> $value")
                     }
                 }
         }
@@ -85,45 +78,34 @@ object QQMusic : YukiBaseHooker() {
         private var currentMediaId: String? = null
 
         fun hook(loader: ClassLoader) {
-            YLog.debug("Hooking Player Process: MediaSession & Lyricon Provider")
+            Log.d(TAG, "Hooking Player Process: MediaSession & Lyricon Provider")
 
-            onAppLifecycle {
-                onCreate {
-                    DiskSongCache.initialize(this)
-                    setupLyriconProvider(this)
-                    registerSettingsReceiver(this)
-                }
+            QQMusic.onAppCreate {
+                DiskSongCache.initialize(QQMusic.appContext as Application)
+                setupLyriconProvider(QQMusic.appContext as Application)
+                registerSettingsReceiver(QQMusic.appContext as Application)
             }
 
-            "android.media.session.MediaSession".toClass(loader)
-                .resolve().apply {
-                    firstMethod {
-                        name = "setPlaybackState"
-                        parameters(PlaybackState::class.java)
-                    }.hook {
-                        after {
-                            val state = (args[0] as? PlaybackState)
-                            lyriconProvider?.player?.setPlaybackState(state)
-                        }
-                    }
+            val sessionClass = "android.media.session.MediaSession".toClass(loader)
 
-                    // 监听歌曲切歌
-                    firstMethod {
-                        name = "setMetadata"
-                        parameters(MediaMetadata::class.java)
-                    }.hook {
-                        after {
-                            val metadata = args[0] as? MediaMetadata ?: return@after
-                            val mediaId = metadata.getString(MediaMetadata.METADATA_KEY_MEDIA_ID)
-                                ?: return@after
+            sessionClass.getDeclaredMethod("setPlaybackState", PlaybackState::class.java)
+                .hookAfter {
+                    val state = (args[0] as? PlaybackState)
+                    lyriconProvider?.player?.setPlaybackState(state)
+                }
 
-                            if (mediaId.isBlank() || mediaId == currentMediaId) return@after
+            // 监听歌曲切歌
+            sessionClass.getDeclaredMethod("setMetadata", MediaMetadata::class.java)
+                .hookAfter {
+                    val metadata = args[0] as? MediaMetadata ?: return@hookAfter
+                    val mediaId = metadata.getString(MediaMetadata.METADATA_KEY_MEDIA_ID)
+                        ?: return@hookAfter
 
-                            currentMediaId = mediaId
-                            MediaMetadataCache.save(metadata)
-                            refreshActiveSong()
-                        }
-                    }
+                    if (mediaId.isBlank() || mediaId == currentMediaId) return@hookAfter
+
+                    currentMediaId = mediaId
+                    MediaMetadataCache.save(metadata)
+                    refreshActiveSong()
                 }
         }
 
@@ -203,7 +185,7 @@ object QQMusic : YukiBaseHooker() {
         }
 
         override fun onDownloadFailed(id: String, e: Exception) {
-            YLog.error("$TAG: Lyric download failed for $id", e)
+            Log.e(TAG, "Lyric download failed for $id", e)
         }
 
         private fun LyricResponse.toLyriconSong(): Song {

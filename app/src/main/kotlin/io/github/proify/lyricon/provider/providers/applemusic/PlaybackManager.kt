@@ -7,12 +7,13 @@
 package io.github.proify.lyricon.provider.providers.applemusic
 
 import android.util.Log
-import com.highcapable.yukihookapi.hook.log.YLog
 import io.github.proify.lyricon.lyric.model.Song
 import io.github.proify.lyricon.provider.RemotePlayer
 import kotlin.system.measureTimeMillis
 
 object PlaybackManager {
+    private const val TAG = "PlaybackManager"
+
     private var player: RemotePlayer? = null
     private var lyricRequester: LyricRequester? = null
 
@@ -31,7 +32,7 @@ object PlaybackManager {
         if (newId.isNullOrBlank()) {
             currentSongId = null
             setSong(null)
-            YLog.debug("PlaybackManager: Song changed to null")
+            Log.d(TAG, "Song changed to null")
             return
         }
 
@@ -39,7 +40,7 @@ object PlaybackManager {
         if (newId == currentSongId) return
         currentSongId = newId
 
-        YLog.debug("PlaybackManager: Song changed to $newId")
+        Log.d(TAG, "Song changed to $newId")
 
         // 1. 立即设置歌曲（可能是完整版，也可能是占位版）
         val song = SongRepository.getSong(newId)
@@ -49,7 +50,7 @@ object PlaybackManager {
         if (song.lyrics.isNullOrEmpty()) {
             lyricRequester?.requestDownload(newId)
         } else {
-            YLog.debug("PlaybackManager: Song $newId has lyrics, skipping download.")
+            Log.d(TAG, "Song $newId has lyrics, skipping download.")
         }
     }
 
@@ -59,7 +60,7 @@ object PlaybackManager {
     fun onLyricsBuilt(nativeSongObj: Any) {
         val song = SongRepository.saveSong(nativeSongObj)
         if (song == null) {
-            YLog.debug("PlaybackManager: Failed to save song.")
+            Log.d(TAG, "Failed to save song.")
             return
         }
         val id = song.id
@@ -73,10 +74,10 @@ object PlaybackManager {
         }
 
         if (id == currentSongId && isSongSame) {
-            YLog.debug("PlaybackManager: Lyrics ready for current song $id, updating player.")
+            Log.d(TAG, "Lyrics ready for current song $id, updating player.")
             setSong(song)
         } else {
-            YLog.debug("PlaybackManager: Lyrics ready for song $id, but not current song.")
+            Log.d(TAG, "Lyrics ready for song $id, but not current song.")
         }
     }
 

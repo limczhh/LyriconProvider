@@ -7,7 +7,7 @@
 package io.github.proify.lyricon.provider.providers.netease
 
 import android.content.SharedPreferences
-import com.highcapable.yukihookapi.hook.log.YLog
+import android.util.Log
 import org.luckypray.dexkit.DexKitBridge
 import org.luckypray.dexkit.result.MethodData
 import java.lang.reflect.Method
@@ -38,7 +38,7 @@ class PreferencesMonitor(
                 }
             }.singleOrNull()
         }
-        YLog.debug("PreferencesMonitor initialization completed in ${time}ms")
+        Log.d("PreferencesMonitor", "Initialization completed in ${time}ms")
     }
 
     private val sharedPreferenceChangeListener =

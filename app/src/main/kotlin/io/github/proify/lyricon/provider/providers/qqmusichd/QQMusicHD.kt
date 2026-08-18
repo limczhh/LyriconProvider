@@ -10,9 +10,8 @@ import android.content.Context
 import android.media.MediaMetadata
 import android.media.session.MediaSession
 import android.media.session.PlaybackState
-import com.highcapable.kavaref.KavaRef.Companion.resolve
-import com.highcapable.yukihookapi.hook.entity.YukiBaseHooker
-import com.highcapable.yukihookapi.hook.log.YLog
+import android.util.Log
+import io.github.proify.lyricon.provider.BaseHooker
 import io.github.proify.lyricon.lyric.model.RichLyricLine
 import io.github.proify.lyricon.lyric.model.Song
 import io.github.proify.lyricon.provider.LyriconFactory
@@ -22,14 +21,13 @@ import io.github.proify.lyricon.provider.parsers.qrckit.QrcDownloader
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import java.util.concurrent.ConcurrentHashMap
 
 /**
  * QQ音乐 HD 版 Lyricon 适配器
  */
-object QQMusicHD : YukiBaseHooker() {
+object QQMusicHD : BaseHooker() {
 
     private const val TAG = "Lyricon_QQMusicHD"
     private const val KEY_OPEN_TRANSLATION = "KEY_OPEN_TRANSLATION"
@@ -48,84 +46,75 @@ object QQMusicHD : YukiBaseHooker() {
 
     private var isCreated = false
     override fun onHook() {
-        val loader = appClassLoader ?: return
+        val loader = appClassLoader
 
-        onAppLifecycle {
-            onCreate {
-                if (isCreated) return@onCreate; isCreated = true
+        onAppCreate {
+            if (isCreated) return@onAppCreate; isCreated = true
 
-                DiskSongCache.initialize(this)
-                initLyriconProvider(this)
-            }
-            onTerminate { internalScope.cancel() }
+            DiskSongCache.initialize(appContext!!)
+            initLyriconProvider(appContext!!)
         }
 
         // ========== Hook RemoteControlManager 以拦截真实 SongId ==========
-        "com.tencent.qqmusic.qplayer.core.player.controller.RemoteControlManager"
-            .toClassOrNull(loader)
-            ?.resolve()
-            ?.apply {
-                firstMethod {
-                    parameters(
+        val remoteControlManagerClass = try {
+            Class.forName(
+                "com.tencent.qqmusic.qplayer.core.player.controller.RemoteControlManager",
+                false, loader
+            )
+        } catch (_: ClassNotFoundException) { null }
+
+        if (remoteControlManagerClass != null) {
+            remoteControlManagerClass.declaredMethods
+                .filter { method ->
+                    method.parameterTypes.map { it.name } == listOf(
                         "com.tencent.qqmusic.openapisdk.model.SongInfo",
                         "com.tencent.qqmusic.openapisdk.core.player.IMediaMetaDataInterface"
                     )
-                }.hook {
-                    before {
-                        val songInfo = args[0] ?: return@before
+                }
+                .forEach { method ->
+                    method.hookBefore {
+                        val songInfo = args[0] ?: return@hookBefore
                         runCatching {
                             // 使用反射获取 SongId，此处保持 Long 到 String 的转换
                             val id =
                                 songInfo.javaClass.getMethod("getSongId").invoke(songInfo) as Long
                             pendingSongId = id.toString()
                         }.onFailure { e ->
-                            YLog.error("$TAG: Failed to extract songId from SongInfo", e)
+                            Log.e(TAG, "Failed to extract songId from SongInfo", e)
                         }
                     }
                 }
-            } ?: YLog.error("$TAG: RemoteControlManager class not found")
+        } else {
+            Log.e(TAG, "RemoteControlManager class not found")
+        }
 
         // ========== Hook MMKV 实时监听翻译开关 ==========
-        "com.tencent.mmkv.MMKV".toClassOrNull(loader)
-            ?.resolve()
-            ?.apply {
-                firstMethod {
-                    name = "putInt"
-                    parameters(String::class.java, Int::class.java)
-                }.hook {
-                    after {
-                        val key = args[0] as? String
-                        val value = args[1] as? Int
-                        if (key == KEY_OPEN_TRANSLATION && value != null) {
-                            // 0 为开启，非 0 为关闭
-                            provider?.player?.setDisplayTranslation(value == 0)
-                        }
-                    }
+        val mmkvClass = try {
+            Class.forName("com.tencent.mmkv.MMKV", false, loader)
+        } catch (_: ClassNotFoundException) { null }
+
+        mmkvClass?.getDeclaredMethod("putInt", String::class.java, Int::class.javaPrimitiveType)
+            ?.hookAfter {
+                val key = args[0] as? String
+                val value = args[1] as? Int
+                if (key == KEY_OPEN_TRANSLATION && value != null) {
+                    // 0 为开启，非 0 为关闭
+                    provider?.player?.setDisplayTranslation(value == 0)
                 }
             }
 
         // ========== Hook MediaSession 同步播放状态与元数据 ==========
-        MediaSession::class.java.resolve().apply {
-            firstMethod {
-                name = "setPlaybackState"
-                parameters(PlaybackState::class.java)
-            }.hook {
-                after {
-                    val state = args[0] as? PlaybackState
-                    provider?.player?.setPlaybackState(state)
-                }
+        MediaSession::class.java.getDeclaredMethod("setPlaybackState", PlaybackState::class.java)
+            .hookAfter {
+                val state = args[0] as? PlaybackState
+                provider?.player?.setPlaybackState(state)
             }
 
-            firstMethod {
-                name = "setMetadata"
-                parameters(MediaMetadata::class.java)
-            }.hook {
-                after {
-                    val metadata = args[0] as? MediaMetadata
-                    metadata?.let { processMetadata(it) }
-                }
+        MediaSession::class.java.getDeclaredMethod("setMetadata", MediaMetadata::class.java)
+            .hookAfter {
+                val metadata = args[0] as? MediaMetadata
+                metadata?.let { processMetadata(it) }
             }
-        }
     }
 
     /**
@@ -166,7 +155,7 @@ object QQMusicHD : YukiBaseHooker() {
                     }
                 }
             } catch (e: Exception) {
-                YLog.error("$TAG: QRC download failed for songId=$songId", e)
+                Log.e(TAG, "QRC download failed for songId=$songId", e)
             } finally {
                 ongoingDownloads.remove(songId)
             }
@@ -190,7 +179,7 @@ object QQMusicHD : YukiBaseHooker() {
             val isTranslationOn = prefs.getInt(KEY_OPEN_TRANSLATION, 1) == 0
             newProvider.player.setDisplayTranslation(isTranslationOn)
         }.onFailure { e ->
-            YLog.error("$TAG: Failed to read initial translation setting", e)
+            Log.e(TAG, "Failed to read initial translation setting", e)
         }
 
         newProvider.register()

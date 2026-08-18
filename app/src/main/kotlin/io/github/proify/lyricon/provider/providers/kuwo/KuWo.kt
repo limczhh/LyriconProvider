@@ -8,25 +8,22 @@ package io.github.proify.lyricon.provider.providers.kuwo
 
 import android.media.MediaMetadata
 import android.media.session.PlaybackState
-import com.highcapable.kavaref.KavaRef.Companion.resolve
-import com.highcapable.yukihookapi.hook.entity.YukiBaseHooker
-import com.highcapable.yukihookapi.hook.log.YLog
+import android.util.Log
+import io.github.proify.lyricon.provider.BaseHooker
 import io.github.proify.lyricon.provider.utils.android.AndroidUtils
 import io.github.proify.lyricon.provider.LyriconFactory
 import io.github.proify.lyricon.provider.LyriconProvider
 import io.github.proify.lyricon.provider.ProviderLogo
 
-open class KuWo(val tag: String = "KuWoProvider") : YukiBaseHooker() {
+open class KuWo(val tag: String = "KuWoProvider") : BaseHooker() {
     private var lyriconProvider: LyriconProvider? = null
 
     override fun onHook() {
-        AndroidUtils.openBluetoothA2dpOn(appClassLoader)
-        YLog.debug(tag = tag, msg = "进程: $processName")
+        AndroidUtils.openBluetoothA2dpOn(module, appClassLoader)
+        Log.d(tag, "进程: $processName")
 
-        onAppLifecycle {
-            onCreate {
-                initProvider()
-            }
+        onAppCreate {
+            initProvider()
         }
         hookMediaSession()
     }
@@ -42,30 +39,22 @@ open class KuWo(val tag: String = "KuWoProvider") : YukiBaseHooker() {
     }
 
     private fun hookMediaSession() {
-        "android.media.session.MediaSession".toClass().resolve().apply {
-            firstMethod {
-                name = "setPlaybackState"
-                parameters(PlaybackState::class.java)
-            }.hook {
-                after {
-                    val state = args[0] as? PlaybackState
-                    lyriconProvider?.player?.setPlaybackState(state)
-                }
-            }
+        val sessionClass = "android.media.session.MediaSession".toClass()
 
-            firstMethod {
-                name = "setMetadata"
-                parameters("android.media.MediaMetadata")
-            }.hook {
-                after {
-                    val metadata = args[0] as? MediaMetadata ?: return@after
-                    val title = metadata.getString(MediaMetadata.METADATA_KEY_TITLE)
-                    if (!title.isNullOrBlank()) {
-                        lyriconProvider?.player?.sendText(title)
-                    } else {
-                        lyriconProvider?.player?.sendText(null)
-                    }
-                }
+        val setPlaybackState = sessionClass.getDeclaredMethod("setPlaybackState", PlaybackState::class.java)
+        setPlaybackState.hookAfter {
+            val state = args[0] as? PlaybackState
+            lyriconProvider?.player?.setPlaybackState(state)
+        }
+
+        val setMetadata = sessionClass.getDeclaredMethod("setMetadata", MediaMetadata::class.java)
+        setMetadata.hookAfter {
+            val metadata = args[0] as? MediaMetadata ?: return@hookAfter
+            val title = metadata.getString(MediaMetadata.METADATA_KEY_TITLE)
+            if (!title.isNullOrBlank()) {
+                lyriconProvider?.player?.sendText(title)
+            } else {
+                lyriconProvider?.player?.sendText(null)
             }
         }
     }

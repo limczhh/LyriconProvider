@@ -13,7 +13,6 @@ pluginManagement {
         maven { url = uri("https://jitpack.io") }
         google()
         gradlePluginPortal()
-        maven { url = uri("https://api.xposed.info/") }
     }
 }
 plugins {
@@ -23,11 +22,14 @@ plugins {
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {
-        mavenLocal()
+        mavenLocal {
+            content {
+                includeGroup("io.github.libxposed")
+            }
+        }
         mavenCentral()
         maven { url = uri("https://jitpack.io") }
         google()
-        maven { url = uri("https://api.xposed.info/") }
     }
 }
 

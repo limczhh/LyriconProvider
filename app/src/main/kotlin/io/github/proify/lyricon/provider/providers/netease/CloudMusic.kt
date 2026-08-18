@@ -8,9 +8,8 @@ package io.github.proify.lyricon.provider.providers.netease
 import android.app.Application
 import android.media.MediaMetadata
 import android.media.session.PlaybackState
-import com.highcapable.kavaref.KavaRef.Companion.resolve
-import com.highcapable.yukihookapi.hook.entity.YukiBaseHooker
-import com.highcapable.yukihookapi.hook.log.YLog
+import android.util.Log
+import io.github.proify.lyricon.provider.BaseHooker
 import io.github.proify.lyricon.provider.providers.netease.Constants.ICON
 import io.github.proify.lyricon.provider.providers.netease.Constants.PROVIDER_PACKAGE_NAME
 import io.github.proify.lyricon.provider.providers.netease.PreferencesMonitor.PreferenceCallback
@@ -28,7 +27,7 @@ import java.io.File
 /**
  * 网易云音乐模块主入口，根据进程名选择性启用歌词提供者钩子。
  */
-object CloudMusic : YukiBaseHooker() {
+object CloudMusic : BaseHooker() {
     private const val TAG = "CloudMusicProvider"
     private val providerManager by lazy { LyricProviderManager() }
 
@@ -40,7 +39,7 @@ object CloudMusic : YukiBaseHooker() {
         when (processName) {
             packageName,
             "$packageName:play" -> {
-                YLog.debug(tag = TAG, msg = "Hooking $processName")
+                Log.d(TAG, "Hooking $processName")
                 providerManager.onHook()
             }
         }
@@ -62,25 +61,23 @@ object CloudMusic : YukiBaseHooker() {
         // ---------------------------------- 入口与初始化 ----------------------------------
 
         fun onHook() {
-            YLog.debug("Hooking, processName= $processName")
+            Log.d(TAG, "Hooking, processName= ${this@CloudMusic.processName}")
 
-            dexKitBridge = DexKitBridge.create(appInfo.sourceDir)
+            dexKitBridge = DexKitBridge.create(this@CloudMusic.appInfo.sourceDir)
             preferencesMonitor = PreferencesMonitor(dexKitBridge!!, object : PreferenceCallback {
                 override fun onTranslationOptionChanged(type: Int) {
                     if (translationType == type) return; translationType = type
-                    YLog.debug("type=$type")
+                    Log.d(TAG, "type=$type")
                     lyricProvider?.player?.setDisplayTranslation(type == 0)
                     lyricProvider?.player?.setDisplayRoma(type == 1)
                 }
             })
 
-            onAppLifecycle {
-                onCreate {
-                    setupProvider()
-                }
+            this@CloudMusic.onAppCreate {
+                setupProvider()
             }
 
-            rehookAfterTinkerLoad(appClassLoader!!)
+            rehookAfterTinkerLoad(this@CloudMusic.appClassLoader)
             hookMediaSession()
         }
 
@@ -88,15 +85,13 @@ object CloudMusic : YukiBaseHooker() {
          * 在 Tinker 热更新后重新挂钩必要的类（如偏好设置监听）。
          */
         private fun rehookAfterTinkerLoad(classLoader: ClassLoader) {
-            "com.tencent.tinker.loader.TinkerLoader".toClass(appClassLoader)
-                .resolve()
-                .method { name = "tryLoad" }
-                .forEach {
-                    it.hook {
-                        after {
-                            val app = args[0] as Application
-                            rehookAfterTinkerLoad(app.classLoader)
-                        }
+            val tinkerClass = "com.tencent.tinker.loader.TinkerLoader".toClass(this@CloudMusic.appClassLoader)
+            tinkerClass.declaredMethods
+                .filter { it.name == "tryLoad" }
+                .forEach { method ->
+                    method.hookAfter {
+                        val app = args[0] as Application
+                        rehookAfterTinkerLoad(app.classLoader)
                     }
                 }
 
@@ -107,7 +102,7 @@ object CloudMusic : YukiBaseHooker() {
          * 初始化并注册 LyriconProvider。
          */
         private fun setupProvider() {
-            val application = appContext ?: return
+            val application = this@CloudMusic.appContext ?: return
             lyricProvider?.destroy()
 
             lyricProvider = LyriconFactory.createProvider(
@@ -124,56 +119,46 @@ object CloudMusic : YukiBaseHooker() {
                 register()
             }
 
-            YLog.info(tag = TAG, msg = "Provider registered")
+            Log.i(TAG, "Provider registered")
         }
 
         // ---------------------------------- MediaSession 钩子 ----------------------------------
 
         private fun hookMediaSession() {
-            "android.media.session.MediaSession".toClass()
-                .resolve()
-                .apply {
-                    firstMethod {
-                        name = "setMetadata"
-                        parameters(MediaMetadata::class.java)
-                    }.hook {
-                        after {
-                            val metadata = args[0] as? MediaMetadata ?: return@after
-                            val data = MediaMetadataCache.save(metadata) ?: return@after
-                            if (currentMusicId == data.id) return@after
+            val sessionClass = "android.media.session.MediaSession".toClass()
 
-                            currentMusicId = data.id
-                            onSongChanged(data)
-                        }
-                    }
+            sessionClass.getDeclaredMethod("setMetadata", MediaMetadata::class.java)
+                .hookAfter {
+                    val metadata = args[0] as? MediaMetadata ?: return@hookAfter
+                    val data = MediaMetadataCache.save(metadata) ?: return@hookAfter
+                    if (currentMusicId == data.id) return@hookAfter
 
-                    firstMethod {
-                        name = "setPlaybackState"
-                        parameters(PlaybackState::class.java)
-                    }.hook {
-                        after {
-                            val state = args[0] as? PlaybackState
-                            lyricProvider?.player?.setPlaybackState(state)
-                        }
-                    }
+                    currentMusicId = data.id
+                    onSongChanged(data)
+                }
+
+            sessionClass.getDeclaredMethod("setPlaybackState", PlaybackState::class.java)
+                .hookAfter {
+                    val state = args[0] as? PlaybackState
+                    lyricProvider?.player?.setPlaybackState(state)
                 }
         }
 
         // ---------------------------------- 下载回调实现 ----------------------------------
 
         override fun onDownloadFinished(id: Long, response: LyricResponse) {
-            YLog.debug(tag = TAG, msg = "Download finished: $id")
+            Log.d(TAG, "Download finished: $id")
             writeToLocalLyricCache(id, response)
         }
 
         override fun onDownloadFailed(id: Long, e: Exception) {
-            YLog.error(tag = TAG, msg = "Download failed: $id, e=$e")
+            Log.e(TAG, "Download failed: $id, e=$e")
         }
 
         // ---------------------------------- 本地缓存读写 ----------------------------------
 
         private fun getDownloadLyricFile(id: Long): File =
-            File(Constants.getDownloadLyricDirectory(appContext!!), id.toString())
+            File(Constants.getDownloadLyricDirectory(this@CloudMusic.appContext!!), id.toString())
 
         @OptIn(ExperimentalSerializationApi::class)
         private fun writeToLocalLyricCache(id: Long, response: LyricResponse) {
@@ -199,7 +184,7 @@ object CloudMusic : YukiBaseHooker() {
          * 从本地缓存文件加载并设置歌词。
          */
         private fun loadLyricFromFile(cacheSource: String, id: Long, cacheFile: File) {
-            YLog.debug(tag = TAG, msg = "Load lyric file: $cacheSource, file=$cacheFile")
+            Log.d(TAG, "Load lyric file: $cacheSource, file=$cacheFile")
 
             val metadata = MediaMetadataCache.get(id) ?: return
             loadAndSetSong(metadata, cacheFile)
@@ -245,7 +230,7 @@ object CloudMusic : YukiBaseHooker() {
                         songToSet = parsedSong
                     }
                 } catch (e: Exception) {
-                    YLog.error("Sync parse failed for $id: ${e.message}", e = e)
+                    Log.e(TAG, "Sync parse failed for $id: ${e.message}", e)
                 }
             }
 

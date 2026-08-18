@@ -8,11 +8,8 @@ package io.github.proify.lyricon.provider.providers.kugou
 
 import android.media.MediaMetadata
 import android.media.session.PlaybackState
-import com.highcapable.kavaref.KavaRef.Companion.resolve
-import com.highcapable.yukihookapi.hook.entity.YukiBaseHooker
-import com.highcapable.yukihookapi.hook.log.YLog
-import de.robv.android.xposed.XC_MethodHook
-import de.robv.android.xposed.XposedBridge
+import android.util.Log
+import io.github.proify.lyricon.provider.BaseHooker
 import io.github.proify.lyricon.provider.utils.extensions.toRichLyricLines
 import io.github.proify.lyricon.provider.parsers.lrckit.LrcParser
 import io.github.proify.lyricon.provider.parsers.krckit.KrcDecryptor
@@ -34,7 +31,7 @@ import java.lang.reflect.Method
  * 酷狗音乐基础 Hook 架构类
  * 负责 MediaSession 状态同步、歌词文件拦截与 Provider 生命周期管理
  */
-abstract class KuGouBase : YukiBaseHooker() {
+abstract class KuGouBase : BaseHooker() {
 
     companion object {
         protected const val TAG = "KuGouProvider"
@@ -60,11 +57,9 @@ abstract class KuGouBase : YukiBaseHooker() {
         hookMediaSession()
         scope.launch { asyncHookLyricManager() }
 
-        onAppLifecycle {
-            onCreate {
-                initProvider()
-                onAppCreate()
-            }
+        onAppCreate {
+            initProvider()
+            onAppCreate()
         }
     }
 
@@ -89,9 +84,9 @@ abstract class KuGouBase : YukiBaseHooker() {
                 player.setDisplayTranslation(true)
             }
             isInitialized = true
-            YLog.info(msg = "Lyricon Provider initialized for ${ctx.packageName}", tag = TAG)
+            Log.i(TAG, "Lyricon Provider initialized for ${ctx.packageName}")
         } catch (e: Exception) {
-            YLog.error(msg = "Failed to init provider: ${e.message}", tag = TAG)
+            Log.e(TAG, "Failed to init provider: ${e.message}", e)
         }
     }
 
@@ -110,7 +105,7 @@ abstract class KuGouBase : YukiBaseHooker() {
                         paramTypes(String::class.java, Boolean::class.javaPrimitiveType)
                     }
                 }.singleOrNull()
-            return methodData?.getMethodInstance(appClassLoader!!)
+            return methodData?.getMethodInstance(appClassLoader)
         }
 
 //        fun findLoadLyricMethodFromReflection(): Method? {
@@ -132,13 +127,10 @@ abstract class KuGouBase : YukiBaseHooker() {
 
         val method = findLoadLyricMethodFromDexKit()
 
-        XposedBridge.hookMethod(method, object : XC_MethodHook() {
-            override fun afterHookedMethod(param: MethodHookParam?) {
-                val args = param?.args ?: return
-                val path = args[0] as? String ?: return
-                processLyricFileAsync(path)
-            }
-        })
+        method?.hookAfter {
+            val path = args[0] as? String ?: return@hookAfter
+            processLyricFileAsync(path)
+        }
     }
 
     /**
@@ -178,33 +170,24 @@ abstract class KuGouBase : YukiBaseHooker() {
                 }
 
             } catch (e: Exception) {
-                YLog.error(tag = TAG, msg = "Lyric parsing failed: ${e.message}")
+                Log.e(TAG, "Lyric parsing failed: ${e.message}", e)
             }
         }
     }
 
     private fun hookMediaSession() {
-        "android.media.session.MediaSession".toClass()
-            .resolve().apply {
-                firstMethod {
-                    name = "setPlaybackState"
-                    parameters(PlaybackState::class.java)
-                }.hook {
-                    after {
-                        val state = args[0] as? PlaybackState
-                        provider?.player?.setPlaybackState(state)
-                    }
-                }
+        val sessionClass = "android.media.session.MediaSession".toClass()
 
-                firstMethod {
-                    name = "setMetadata"
-                    parameters(MediaMetadata::class.java)
-                }.hook {
-                    after {
-                        val metadata = args[0] as? MediaMetadata ?: return@after
-                        handleMetadataChange(metadata)
-                    }
-                }
+        sessionClass.getDeclaredMethod("setPlaybackState", PlaybackState::class.java)
+            .hookAfter {
+                val state = args[0] as? PlaybackState
+                provider?.player?.setPlaybackState(state)
+            }
+
+        sessionClass.getDeclaredMethod("setMetadata", MediaMetadata::class.java)
+            .hookAfter {
+                val metadata = args[0] as? MediaMetadata ?: return@hookAfter
+                handleMetadataChange(metadata)
             }
     }
 
@@ -224,7 +207,7 @@ abstract class KuGouBase : YukiBaseHooker() {
         currentSongId = songId
 
         MetadataDataManager.put(meta)
-        //YLog.info(tag = TAG, msg = "Track Changed: $title - $artist")
+        //Log.i(TAG, "Track Changed: $title - $artist")
 
         // 尝试从缓存获取歌词
         LyricsCache.get(songId)?.let {
@@ -266,6 +249,6 @@ abstract class KuGouBase : YukiBaseHooker() {
         if (lastEmittedSong == song) return
         lastEmittedSong = song
         provider?.player?.setSong(song)
-        YLog.info(tag = TAG, msg = "Successfully pushed song to Provider: ${song.name}")
+        Log.i(TAG, "Successfully pushed song to Provider: ${song.name}")
     }
 }

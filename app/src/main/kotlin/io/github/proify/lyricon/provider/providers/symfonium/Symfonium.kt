@@ -9,17 +9,16 @@ package io.github.proify.lyricon.provider.providers.symfonium
 import android.media.MediaMetadata
 import android.media.session.PlaybackState
 import android.net.Uri
-import com.highcapable.kavaref.KavaRef.Companion.resolve
-import com.highcapable.yukihookapi.hook.entity.YukiBaseHooker
-import com.highcapable.yukihookapi.hook.log.YLog
+import android.util.Log
 import com.kyant.taglib.TagLib
+import io.github.proify.lyricon.provider.BaseHooker
 import io.github.proify.lyricon.provider.parsers.lrckit.EnhanceLrcParser
 import io.github.proify.lyricon.lyric.model.Song
 import io.github.proify.lyricon.provider.LyriconFactory
 import io.github.proify.lyricon.provider.LyriconProvider
 import io.github.proify.lyricon.provider.ProviderLogo
 
-class Symfonium : YukiBaseHooker() {
+class Symfonium : BaseHooker() {
     companion object {
         const val TAG: String = "Symfonium"
     }
@@ -32,41 +31,32 @@ class Symfonium : YukiBaseHooker() {
     private var currentSong: Song? = null
 
     override fun onHook() {
-        YLog.debug(tag = TAG, msg = "进程: $packageName/$processName")
+        Log.d(TAG, "进程: $packageName/$processName")
 
-        onAppLifecycle {
-            onCreate {
-                initProvider()
-            }
+        onAppCreate {
+            initProvider()
         }
         hookMediaSession()
 
-        Uri::class.java.name.toClass()
-            .resolve().apply {
-
-                firstMethod {
-                    name = "parse"
-                    parameters(String::class.java)
-                }.hook {
-                    after {
-                        val uri = args[0] as String
-                        if (!uri.startsWith("content://media/external/audio/")) {
-                            return@after
-                        }
-
-                        val result = this.result as Uri
-                        if (currentMediaUri == result) {
-                            //YLog.debug(tag = TAG, msg = "skip same uri: $uri")
-                            return@after
-                        }
-                        YLog.debug(tag = TAG, msg = "load uri: $uri")
-                        currentMediaUri = result
-
-                        val lyric = fetchLyricFromTag(result)
-                        setLyric(uri, lyric)
-                    }
-                }
+        val uriClass = Uri::class.java.name.toClass()
+        val parseMethod = uriClass.getDeclaredMethod("parse", String::class.java)
+        parseMethod.hookAfter {
+            val uri = args[0] as String
+            if (!uri.startsWith("content://media/external/audio/")) {
+                return@hookAfter
             }
+
+            val result = result as Uri
+            if (currentMediaUri == result) {
+                //Log.d(TAG, "skip same uri: $uri")
+                return@hookAfter
+            }
+            Log.d(TAG, "load uri: $uri")
+            currentMediaUri = result
+
+            val lyric = fetchLyricFromTag(result)
+            setLyric(uri, lyric)
+        }
 
     }
 
@@ -88,7 +78,7 @@ class Symfonium : YukiBaseHooker() {
 
     private fun setSong(song: Song) {
         if (currentSong == song) {
-            YLog.debug(tag = TAG, msg = "skip same song: ${song.name}")
+            Log.d(TAG, "skip same song: ${song.name}")
             return
         }
         currentSong = song
@@ -104,7 +94,7 @@ class Symfonium : YukiBaseHooker() {
             }
         }
     } catch (e: Exception) {
-        YLog.error(tag = TAG, msg = "Failed to fetch lyric tag from $uri", e = e)
+        Log.e(TAG, "Failed to fetch lyric tag from $uri", e)
         null
     }
 
@@ -119,33 +109,25 @@ class Symfonium : YukiBaseHooker() {
     }
 
     private fun hookMediaSession() {
-        "android.media.session.MediaSession".toClass().resolve().apply {
-            firstMethod {
-                name = "setPlaybackState"
-                parameters(PlaybackState::class.java)
-            }.hook {
-                after {
-                    val state = args[0] as? PlaybackState
-                    lyriconProvider?.player?.setPlaybackState(state)
-                }
+        val mediaSessionClass = "android.media.session.MediaSession".toClass()
+
+        mediaSessionClass.getDeclaredMethod("setPlaybackState", PlaybackState::class.java)
+            .hookAfter {
+                val state = args[0] as? PlaybackState
+                lyriconProvider?.player?.setPlaybackState(state)
             }
 
-            firstMethod {
-                name = "setMetadata"
-                parameters("android.media.MediaMetadata")
-            }.hook {
-                after {
-                    val metadata = args[0] as? MediaMetadata ?: return@after
-                    if (metadata == currentMediaMetadata) {
-                        // YLog.debug(tag = TAG, msg = "skip same metadata")
-                        return@after
-                    }
-                    val title = metadata.getString(MediaMetadata.METADATA_KEY_TITLE)
-                    val artist = metadata.getString(MediaMetadata.METADATA_KEY_ARTIST)
-                    YLog.debug(tag = TAG, msg = "set metadata: $title - $artist")
-                    currentMediaMetadata = metadata
+        mediaSessionClass.getDeclaredMethod("setMetadata", MediaMetadata::class.java)
+            .hookAfter {
+                val metadata = args[0] as? MediaMetadata ?: return@hookAfter
+                if (metadata == currentMediaMetadata) {
+                    // Log.d(TAG, "skip same metadata")
+                    return@hookAfter
                 }
+                val title = metadata.getString(MediaMetadata.METADATA_KEY_TITLE)
+                val artist = metadata.getString(MediaMetadata.METADATA_KEY_ARTIST)
+                Log.d(TAG, "set metadata: $title - $artist")
+                currentMediaMetadata = metadata
             }
-        }
     }
 }

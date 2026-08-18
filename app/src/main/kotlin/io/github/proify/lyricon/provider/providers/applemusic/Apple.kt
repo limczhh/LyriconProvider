@@ -8,11 +8,8 @@ package io.github.proify.lyricon.provider.providers.applemusic
 
 import android.app.Application
 import android.media.MediaMetadata
-import com.highcapable.kavaref.KavaRef.Companion.resolve
-import com.highcapable.kavaref.condition.type.VagueType
-import com.highcapable.yukihookapi.hook.entity.YukiBaseHooker
-import com.highcapable.yukihookapi.hook.log.YLog
-import de.robv.android.xposed.XposedHelpers
+import android.util.Log
+import io.github.proify.lyricon.provider.BaseHooker
 import io.github.proify.lyricon.provider.utils.android.ScreenStateMonitor
 import io.github.proify.lyricon.provider.LyriconFactory
 import io.github.proify.lyricon.provider.LyriconProvider
@@ -28,7 +25,9 @@ import kotlinx.coroutines.launch
 import java.lang.reflect.Method
 import java.lang.reflect.Modifier
 
-object Apple : YukiBaseHooker() {
+object Apple : BaseHooker() {
+    private const val TAG = "AppleProvider"
+
     private lateinit var application: Application
     private lateinit var classLoader: ClassLoader
 
@@ -46,15 +45,13 @@ object Apple : YukiBaseHooker() {
     private var provider: LyriconProvider? = null
 
     override fun onHook() {
-        onAppLifecycle {
-            onCreate { onAppCreate() }
-        }
+        onAppCreate { initApp() }
     }
 
-    private fun onAppCreate() {
-        application = appContext ?: return
+    private fun initApp() {
+        application = (appContext ?: return) as Application
         classLoader = appClassLoader ?: return
-        PreferencesMonitor.initialize(application)
+        PreferencesMonitor.initialize(application, module)
         PreferencesMonitor.listener = object : PreferencesMonitor.Listener {
             override fun onTranslationSelectedChanged(selected: Boolean) {
                 provider?.player?.setDisplayTranslation(selected)
@@ -92,32 +89,24 @@ object Apple : YukiBaseHooker() {
         hookMediaMetadataChange()
         hookLyricBuildMethod()
 
-//        XposedHelpers.findAndHookMethod(
-//            "com.apple.android.music.player.viewmodel.PlayerLyricsViewModel",
-//            classLoader,
-//            "loadLyrics",
-//            classLoader.loadClass("com.apple.android.music.model.PlaybackItem"),
-//            object : XC_MethodHook() {
-//                @Throws(Throwable::class)
-//                override fun afterHookedMethod(param: MethodHookParam?) {
-//                    val arg = param?.args?.get(0) ?: return
-//                    ObjectUtils.print(arg)
-//                }
-//            })
+//        Class.forName("com.apple.android.music.player.viewmodel.PlayerLyricsViewModel", false, classLoader)
+//            .findMethod("loadLyrics", Class.forName("com.apple.android.music.model.PlaybackItem", false, classLoader))
+//            .hookAfter {
+//                val arg = args[0] ?: return@hookAfter
+//                ObjectUtils.print(arg)
+//            }
     }
 
     // --- Hook 1: 歌曲切换监听 ---
     private fun hookMediaMetadataChange() {
         val method = findMediaMetadataChangeMethod() ?: return
 
-        method.hook {
-            after {
-                val mediaMetadata = args[0] as? MediaMetadata ?: return@after
-                val metadata = MediaMetadataCache.putAndGet(mediaMetadata) ?: return@after
+        method.hookAfter {
+            val mediaMetadata = args[0] as? MediaMetadata ?: return@hookAfter
+            val metadata = MediaMetadataCache.putAndGet(mediaMetadata) ?: return@hookAfter
 
-                // 委托给 Manager 处理
-                PlaybackManager.onSongChanged(metadata.id)
-            }
+            // 委托给 Manager 处理
+            PlaybackManager.onSongChanged(metadata.id)
         }
     }
 
@@ -125,24 +114,22 @@ object Apple : YukiBaseHooker() {
     private fun hookLyricBuildMethod() {
         val m =
             classLoader.loadClass("com.apple.android.music.player.viewmodel.PlayerLyricsViewModel")
-                .resolve()
-                .firstMethod { name = "buildTimeRangeToLyricsMap" }
-                .hook {
-                    after {
-                        YLog.debug("buildTimeRangeToLyricsMap:$args")
-                        val arg: Any? = args[0]
-                        if (arg == null) {
-                            YLog.debug("args0 null")
-                            return@after
-                        }
-                        val songNative = XposedHelpers.callMethod(arg, "get")
-                        YLog.debug("songNative: $songNative")
-
-                        // 委托给 Manager 处理
-                        PlaybackManager.onLyricsBuilt(songNative)
+                .declaredMethods
+                .first { it.name == "buildTimeRangeToLyricsMap" }
+                .hookAfter {
+                    Log.d(TAG, "buildTimeRangeToLyricsMap:$args")
+                    val arg: Any? = args[0]
+                    if (arg == null) {
+                        Log.d(TAG, "args0 null")
+                        return@hookAfter
                     }
+                    val songNative = arg.callMethod("get")
+                    Log.d(TAG, "songNative: $songNative")
+
+                    // 委托给 Manager 处理
+                    PlaybackManager.onLyricsBuilt(songNative!!)
                 }
-        YLog.debug("hookLyricBuildMethod Hooked: $m")
+        Log.d(TAG, "hookLyricBuildMethod Hooked: $m")
     }
 
     // --- Hook 3: 播放器控制  ---
@@ -151,31 +138,24 @@ object Apple : YukiBaseHooker() {
             classLoader.loadClass("com.apple.android.music.playback.player.ExoMediaPlayer")
 
         exoPlayerClass.declaredConstructors.forEach { constructor ->
-            constructor.hook {
-                after {
-                    exoMediaPlayerInstance = instanceOrNull
-                    getPositionMethod = instanceClass?.getDeclaredMethod("getCurrentPosition")
-                }
+            constructor.hookAfter {
+                exoMediaPlayerInstance = instanceOrNull
+                getPositionMethod = instanceClass?.getDeclaredMethod("getCurrentPosition")
             }
         }
 
-        exoPlayerClass.resolve().firstMethod {
-            name = "seekToPosition"
-            parameters(Long::class)
-        }.hook {
-            after {
-                val position = args(0).cast<Long>() ?: 0L
+        exoPlayerClass.declaredMethods
+            .first { it.name == "seekToPosition" && it.parameterCount == 1 }
+            .hookAfter {
+                val position = args[0] as? Long ?: 0L
                 if (isPlaying) provider?.player?.seekTo(position)
             }
-        }
 
         classLoader.loadClass("com.apple.android.music.playback.controller.LocalMediaPlayerController")
-            .resolve()
-            .method {
-                name = "onPlaybackStateChanged"
-                parameters(VagueType, Int::class, Int::class)
-            }.first().hook {
-                after {
+            .declaredMethods
+            .filter { it.name == "onPlaybackStateChanged" && it.parameterCount == 3 }
+            .forEach { method ->
+                method.hookAfter {
                     when (PlaybackState.of(args[2] as Int)) {
                         PlaybackState.PLAYING -> startSyncAction()
                         else -> stopSyncAction()

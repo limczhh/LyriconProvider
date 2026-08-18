@@ -8,30 +8,33 @@ package io.github.proify.lyricon.provider.providers.applemusic
 
 import android.annotation.SuppressLint
 import android.content.Context
-import de.robv.android.xposed.XC_MethodHook
-import de.robv.android.xposed.XposedHelpers
+import io.github.libxposed.api.XposedInterface
 
 @SuppressLint("StaticFieldLeak")
 object PreferencesMonitor {
 
     private lateinit var context: Context
+    private lateinit var module: XposedInterface
     var listener: Listener? = null
 
-    fun initialize(context: Context) {
+    fun initialize(context: Context, module: XposedInterface) {
         if (::context.isInitialized) return
         this.context = context.applicationContext
+        this.module = module
 
-        XposedHelpers.findAndHookMethod(
+        val clazz = Class.forName(
             "com.apple.android.music.utils.AppSharedPreferences",
-            context.classLoader,
+            false,
+            context.classLoader
+        )
+        val method = clazz.getDeclaredMethod(
             "setLyricsTranslationSelected",
-            Boolean::class.javaPrimitiveType,
-            object : XC_MethodHook() {
-                @Throws(Throwable::class)
-                override fun afterHookedMethod(param: MethodHookParam?) {
-                    listener?.onTranslationSelectedChanged(param?.args[0] as Boolean)
-                }
-            })
+            Boolean::class.javaPrimitiveType
+        )
+        module.hook(method).intercept { chain ->
+            listener?.onTranslationSelectedChanged(chain.args[0] as Boolean)
+            chain.proceed()
+        }
     }
 
     fun isTranslationSelected(): Boolean =
