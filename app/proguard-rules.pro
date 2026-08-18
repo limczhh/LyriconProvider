@@ -1,29 +1,18 @@
-# === Xposed / libxposed API 102 ===
+# === libxposed API 102 ===
 -dontwarn io.github.libxposed.annotation.**
+-dontwarn androidx.annotation.NonNull
+-dontwarn androidx.annotation.Nullable
 -adaptresourcefilecontents META-INF/xposed/java_init.list
 -keep,allowoptimization,allowobfuscation public class * extends io.github.libxposed.api.XposedModule {
     public <init>();
 }
 -keep class org.luckypray.dexkit.** { *; }
 
-# === Provider 常量（包名、图标等运行时使用）===
--keep class io.github.proify.lyricon.provider.providers.**.Constants { *; }
-
-# === Central Bridge（广播注册、AIDL 通信）===
--keep class io.github.proify.lyricon.central.** { *; }
--keep class io.github.proify.lyricon.subscriber.** { *; }
-
-# === AIDL 生成的接口 ===
--keep class io.github.proify.lyricon.provider.IRemotePlayer { *; }
--keep class io.github.proify.lyricon.provider.IRemoteService { *; }
--keep class io.github.proify.lyricon.provider.IProviderBinder { *; }
--keep class io.github.proify.lyricon.provider.IProviderService { *; }
+# === AIDL 接口（Binder 接口名必须保持不变）===
 -keep class io.github.proify.lyricon.subscriber.ISubscriberBinder { *; }
 -keep class io.github.proify.lyricon.subscriber.IActivePlayerListener { *; }
 -keep class io.github.proify.lyricon.subscriber.IRemoteService { *; }
--keep class io.github.proify.lyricon.provider.ProviderInfo { *; }
 -keep class io.github.proify.lyricon.subscriber.ProviderInfo { *; }
--keep class io.github.proify.lyricon.lyric.model.Song { *; }
 
 # === Kotlin 序列化 ===
 -keepattributes *Annotation*, InnerClasses
