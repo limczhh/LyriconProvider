@@ -248,14 +248,16 @@ open class MeizuProvider(
     private fun hookMedia() {
         val mediaSessionClass = "android.media.session.MediaSession".toClass()
 
-        mediaSessionClass.getDeclaredMethod("setPlaybackState", PlaybackState::class.java)
-            .hookAfter {
+        val setPlaybackStateMethod = mediaSessionClass.getDeclaredMethod("setPlaybackState", PlaybackState::class.java)
+        module.deoptimize(setPlaybackStateMethod)
+        setPlaybackStateMethod.hookAfter {
                 val state = (args[0] as PlaybackState)
                 provider?.player?.setPlaybackState(state)
             }
 
-        mediaSessionClass.getDeclaredMethod("setMetadata", MediaMetadata::class.java)
-            .hookAfter {
+        val setMetadataMethod = mediaSessionClass.getDeclaredMethod("setMetadata", MediaMetadata::class.java)
+        module.deoptimize(setMetadataMethod)
+        setMetadataMethod.hookAfter {
                 val metadata = args[0] as? MediaMetadata ?: return@hookAfter
                 val title = metadata.getString(MediaMetadata.METADATA_KEY_TITLE)
                 val artist = metadata.getString(MediaMetadata.METADATA_KEY_ARTIST)
