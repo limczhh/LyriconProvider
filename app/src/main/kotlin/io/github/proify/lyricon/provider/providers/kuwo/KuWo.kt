@@ -42,12 +42,14 @@ open class KuWo(val tag: String = "KuWoProvider") : BaseHooker() {
         val sessionClass = "android.media.session.MediaSession".toClass()
 
         val setPlaybackState = sessionClass.getDeclaredMethod("setPlaybackState", PlaybackState::class.java)
+        module.deoptimize(setPlaybackState)
         setPlaybackState.hookAfter {
             val state = args[0] as? PlaybackState
             lyriconProvider?.player?.setPlaybackState(state)
         }
 
         val setMetadata = sessionClass.getDeclaredMethod("setMetadata", MediaMetadata::class.java)
+        module.deoptimize(setMetadata)
         setMetadata.hookAfter {
             val metadata = args[0] as? MediaMetadata ?: return@hookAfter
             val title = metadata.getString(MediaMetadata.METADATA_KEY_TITLE)
