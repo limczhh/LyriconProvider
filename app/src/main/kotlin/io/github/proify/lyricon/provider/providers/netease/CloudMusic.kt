@@ -127,21 +127,23 @@ object CloudMusic : BaseHooker() {
         private fun hookMediaSession() {
             val sessionClass = "android.media.session.MediaSession".toClass()
 
-            sessionClass.getDeclaredMethod("setMetadata", MediaMetadata::class.java)
-                .hookAfter {
-                    val metadata = args[0] as? MediaMetadata ?: return@hookAfter
-                    val data = MediaMetadataCache.save(metadata) ?: return@hookAfter
-                    if (currentMusicId == data.id) return@hookAfter
+            val setMetadataMethod = sessionClass.getDeclaredMethod("setMetadata", MediaMetadata::class.java)
+            module.deoptimize(setMetadataMethod)
+            setMetadataMethod.hookAfter {
+                val metadata = args[0] as? MediaMetadata ?: return@hookAfter
+                val data = MediaMetadataCache.save(metadata) ?: return@hookAfter
+                if (currentMusicId == data.id) return@hookAfter
 
-                    currentMusicId = data.id
-                    onSongChanged(data)
-                }
+                currentMusicId = data.id
+                onSongChanged(data)
+            }
 
-            sessionClass.getDeclaredMethod("setPlaybackState", PlaybackState::class.java)
-                .hookAfter {
-                    val state = args[0] as? PlaybackState
-                    lyricProvider?.player?.setPlaybackState(state)
-                }
+            val setPlaybackStateMethod = sessionClass.getDeclaredMethod("setPlaybackState", PlaybackState::class.java)
+            module.deoptimize(setPlaybackStateMethod)
+            setPlaybackStateMethod.hookAfter {
+                val state = args[0] as? PlaybackState
+                lyricProvider?.player?.setPlaybackState(state)
+            }
         }
 
         // ---------------------------------- 下载回调实现 ----------------------------------
