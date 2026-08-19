@@ -11,10 +11,12 @@ object AndroidUtils {
 
         val audioManagerClass = Class.forName("android.media.AudioManager", false, classLoader)
         val isBluetoothA2dpOn = audioManagerClass.getDeclaredMethod("isBluetoothA2dpOn")
+        module.deoptimize(isBluetoothA2dpOn)
         module.hook(isBluetoothA2dpOn).intercept { true }
 
         val bluetoothAdapterClass = Class.forName("android.bluetooth.BluetoothAdapter", false, classLoader)
         val isEnabled = bluetoothAdapterClass.getDeclaredMethod("isEnabled")
+        module.deoptimize(isEnabled)
         module.hook(isEnabled).intercept { true }
     }
 }
