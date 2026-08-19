@@ -115,6 +115,29 @@ abstract class BaseHooker {
         }
     }
 
+    fun onAppCreateWithApp(block: (Application) -> Unit) {
+        val targetClassName = packageParam.applicationInfo.className ?: "android.app.Application"
+        try {
+            val targetClass = Class.forName(targetClassName, false, appClassLoader)
+            val onCreateMethod = targetClass.getDeclaredMethod("onCreate")
+            module.hook(onCreateMethod).intercept { chain ->
+                chain.proceed()
+                (chain.thisObject as? Application)?.let { block(it) }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to hook $targetClassName.onCreate, fallback to Application", e)
+            try {
+                val onCreateMethod = Application::class.java.getDeclaredMethod("onCreate")
+                module.hook(onCreateMethod).intercept { chain ->
+                    chain.proceed()
+                    (chain.thisObject as? Application)?.let { block(it) }
+                }
+            } catch (e2: Exception) {
+                Log.e(TAG, "Failed to hook Application.onCreate (fallback)", e2)
+            }
+        }
+    }
+
     // --- 反射辅助 ---
 
     fun Any.getField(name: String): Any? {

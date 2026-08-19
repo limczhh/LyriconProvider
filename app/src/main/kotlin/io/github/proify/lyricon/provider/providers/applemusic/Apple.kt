@@ -45,11 +45,11 @@ object Apple : BaseHooker() {
     private var provider: LyriconProvider? = null
 
     override fun onHook() {
-        onAppCreate { initApp() }
+        onAppCreateWithApp { app -> initApp(app) }
     }
 
-    private fun initApp() {
-        application = (appContext ?: return) as Application
+    private fun initApp(app: Application) {
+        application = app
         classLoader = appClassLoader ?: return
         PreferencesMonitor.initialize(application, module)
         PreferencesMonitor.listener = object : PreferencesMonitor.Listener {
