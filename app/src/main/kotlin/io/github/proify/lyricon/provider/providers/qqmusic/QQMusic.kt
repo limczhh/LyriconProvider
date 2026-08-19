@@ -54,22 +54,23 @@ object QQMusic : BaseHooker() {
         fun hook(loader: ClassLoader) {
             Log.d(TAG, "Hooking Main Process: SharedPreferences interceptor")
 
-            "android.app.SharedPreferencesImpl\$EditorImpl".toClass(loader)
+            val putBooleanMethod = "android.app.SharedPreferencesImpl\$EditorImpl".toClass(loader)
                 .getDeclaredMethod("putBoolean", String::class.java, Boolean::class.javaPrimitiveType)
-                .hookAfter {
-                    val key = args[0] as String
-                    val value = args[1] as Boolean
+            QQMusic.module.deoptimize(putBooleanMethod)
+            putBooleanMethod.hookAfter {
+                val key = args[0] as String
+                val value = args[1] as Boolean
 
-                    if (key == KEY_DISPLAY_TRANS || key == KEY_DISPLAY_ROMA) {
-                        val intent = Intent(ACTION_LYRIC_SETTINGS_CHANGED).apply {
-                            putExtra("setting_key", key)
-                            putExtra("setting_value", value)
-                            setPackage(QQMusic.appContext?.packageName)
-                        }
-                        QQMusic.appContext?.sendBroadcast(intent)
-                        Log.d(TAG, "Settings changed in main process: $key -> $value")
+                if (key == KEY_DISPLAY_TRANS || key == KEY_DISPLAY_ROMA) {
+                    val intent = Intent(ACTION_LYRIC_SETTINGS_CHANGED).apply {
+                        putExtra("setting_key", key)
+                        putExtra("setting_value", value)
+                        setPackage(QQMusic.appContext?.packageName)
                     }
+                    QQMusic.appContext?.sendBroadcast(intent)
+                    Log.d(TAG, "Settings changed in main process: $key -> $value")
                 }
+            }
         }
     }
 
@@ -80,33 +81,35 @@ object QQMusic : BaseHooker() {
         fun hook(loader: ClassLoader) {
             Log.d(TAG, "Hooking Player Process: MediaSession & Lyricon Provider")
 
-            QQMusic.onAppCreate {
-                DiskSongCache.initialize(QQMusic.appContext as Application)
-                setupLyriconProvider(QQMusic.appContext as Application)
-                registerSettingsReceiver(QQMusic.appContext as Application)
+            QQMusic.onAppCreateWithApp { app ->
+                DiskSongCache.initialize(app)
+                setupLyriconProvider(app)
+                registerSettingsReceiver(app)
             }
 
             val sessionClass = "android.media.session.MediaSession".toClass(loader)
 
-            sessionClass.getDeclaredMethod("setPlaybackState", PlaybackState::class.java)
-                .hookAfter {
-                    val state = (args[0] as? PlaybackState)
-                    lyriconProvider?.player?.setPlaybackState(state)
-                }
+            val setPlaybackStateMethod = sessionClass.getDeclaredMethod("setPlaybackState", PlaybackState::class.java)
+            QQMusic.module.deoptimize(setPlaybackStateMethod)
+            setPlaybackStateMethod.hookAfter {
+                val state = (args[0] as? PlaybackState)
+                lyriconProvider?.player?.setPlaybackState(state)
+            }
 
             // 监听歌曲切歌
-            sessionClass.getDeclaredMethod("setMetadata", MediaMetadata::class.java)
-                .hookAfter {
-                    val metadata = args[0] as? MediaMetadata ?: return@hookAfter
-                    val mediaId = metadata.getString(MediaMetadata.METADATA_KEY_MEDIA_ID)
-                        ?: return@hookAfter
+            val setMetadataMethod = sessionClass.getDeclaredMethod("setMetadata", MediaMetadata::class.java)
+            QQMusic.module.deoptimize(setMetadataMethod)
+            setMetadataMethod.hookAfter {
+                val metadata = args[0] as? MediaMetadata ?: return@hookAfter
+                val mediaId = metadata.getString(MediaMetadata.METADATA_KEY_MEDIA_ID)
+                    ?: return@hookAfter
 
-                    if (mediaId.isBlank() || mediaId == currentMediaId) return@hookAfter
+                if (mediaId.isBlank() || mediaId == currentMediaId) return@hookAfter
 
-                    currentMediaId = mediaId
-                    MediaMetadataCache.save(metadata)
-                    refreshActiveSong()
-                }
+                currentMediaId = mediaId
+                MediaMetadataCache.save(metadata)
+                refreshActiveSong()
+            }
         }
 
         private fun registerSettingsReceiver(application: Application) {
