@@ -40,6 +40,7 @@ class Symfonium : BaseHooker() {
 
         val uriClass = Uri::class.java.name.toClass()
         val parseMethod = uriClass.getDeclaredMethod("parse", String::class.java)
+        module.deoptimize(parseMethod)
         parseMethod.hookAfter {
             val uri = args[0] as String
             if (!uri.startsWith("content://media/external/audio/")) {
@@ -111,14 +112,16 @@ class Symfonium : BaseHooker() {
     private fun hookMediaSession() {
         val mediaSessionClass = "android.media.session.MediaSession".toClass()
 
-        mediaSessionClass.getDeclaredMethod("setPlaybackState", PlaybackState::class.java)
-            .hookAfter {
+        val setPlaybackStateMethod = mediaSessionClass.getDeclaredMethod("setPlaybackState", PlaybackState::class.java)
+        module.deoptimize(setPlaybackStateMethod)
+        setPlaybackStateMethod.hookAfter {
                 val state = args[0] as? PlaybackState
                 lyriconProvider?.player?.setPlaybackState(state)
             }
 
-        mediaSessionClass.getDeclaredMethod("setMetadata", MediaMetadata::class.java)
-            .hookAfter {
+        val setMetadataMethod = mediaSessionClass.getDeclaredMethod("setMetadata", MediaMetadata::class.java)
+        module.deoptimize(setMetadataMethod)
+        setMetadataMethod.hookAfter {
                 val metadata = args[0] as? MediaMetadata ?: return@hookAfter
                 if (metadata == currentMediaMetadata) {
                     // Log.d(TAG, "skip same metadata")
