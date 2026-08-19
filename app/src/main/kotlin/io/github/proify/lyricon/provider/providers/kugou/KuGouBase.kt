@@ -178,14 +178,16 @@ abstract class KuGouBase : BaseHooker() {
     private fun hookMediaSession() {
         val sessionClass = "android.media.session.MediaSession".toClass()
 
-        sessionClass.getDeclaredMethod("setPlaybackState", PlaybackState::class.java)
-            .hookAfter {
+        val setPlaybackStateMethod = sessionClass.getDeclaredMethod("setPlaybackState", PlaybackState::class.java)
+        module.deoptimize(setPlaybackStateMethod)
+        setPlaybackStateMethod.hookAfter {
                 val state = args[0] as? PlaybackState
                 provider?.player?.setPlaybackState(state)
             }
 
-        sessionClass.getDeclaredMethod("setMetadata", MediaMetadata::class.java)
-            .hookAfter {
+        val setMetadataMethod = sessionClass.getDeclaredMethod("setMetadata", MediaMetadata::class.java)
+        module.deoptimize(setMetadataMethod)
+        setMetadataMethod.hookAfter {
                 val metadata = args[0] as? MediaMetadata ?: return@hookAfter
                 handleMetadataChange(metadata)
             }
