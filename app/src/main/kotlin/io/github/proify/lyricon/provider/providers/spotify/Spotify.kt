@@ -64,6 +64,7 @@ object Spotify : BaseHooker(), DownloadCallback {
         clazz.declaredMethods
             .filter { it.name == "setPlaybackState" && it.parameterCount == 1 }
             .forEach { method ->
+                module.deoptimize(method)
                 method.hookAfter {
                     val state = (args[0] as? PlaybackState) ?: return@hookAfter
                     lyriconProvider?.player?.setPlaybackState(state)
@@ -73,6 +74,7 @@ object Spotify : BaseHooker(), DownloadCallback {
         clazz.declaredMethods
             .filter { it.name == "setMetadata" && it.parameterCount == 1 }
             .forEach { method ->
+                module.deoptimize(method)
                 method.hookAfter {
                     val metadata = args[0] as? MediaMetadata ?: return@hookAfter
 
