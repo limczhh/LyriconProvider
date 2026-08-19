@@ -157,6 +157,7 @@ object QiShui : BaseHooker() {
         val sessionClass = "android.media.session.MediaSession".toClass()
 
         val setPlaybackState = sessionClass.getDeclaredMethod("setPlaybackState", PlaybackState::class.java)
+        module.deoptimize(setPlaybackState)
         setPlaybackState.hookAfter {
             val state = args[0] as? PlaybackState
             provider?.player?.setPlaybackState(state)
@@ -164,6 +165,7 @@ object QiShui : BaseHooker() {
         }
 
         val setMetadata = sessionClass.getDeclaredMethod("setMetadata", MediaMetadata::class.java)
+        module.deoptimize(setMetadata)
         setMetadata.hookAfter {
             val mediaMetadata = args[0] as? MediaMetadata ?: return@hookAfter
             val id = mediaMetadata.getString(MediaMetadata.METADATA_KEY_MEDIA_ID)
