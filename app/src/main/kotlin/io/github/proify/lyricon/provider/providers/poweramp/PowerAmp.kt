@@ -70,6 +70,7 @@ object PowerAmp : BaseHooker() {
     private fun hookMediaSession() {
         val sessionClass = "android.media.session.MediaSession".toClass()
         val setPlaybackState = sessionClass.getDeclaredMethod("setPlaybackState", PlaybackState::class.java)
+        module.deoptimize(setPlaybackState)
         setPlaybackState.hookAfter {
             val state = args[0] as? PlaybackState ?: return@hookAfter
             provider?.player?.setPlaybackState(state)
