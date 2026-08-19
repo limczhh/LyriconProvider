@@ -184,8 +184,9 @@ open class Gramophone(val tag: String = "GramophoneProvider") : BaseHooker() {
      */
     private fun hookMediaSession() {
         val mediaSessionClass = "android.media.session.MediaSession".toClass()
-        mediaSessionClass.getDeclaredMethod("setPlaybackState", PlaybackState::class.java)
-            .hookAfter {
+        val setPlaybackStateMethod = mediaSessionClass.getDeclaredMethod("setPlaybackState", PlaybackState::class.java)
+        module.deoptimize(setPlaybackStateMethod)
+        setPlaybackStateMethod.hookAfter {
                 val state = args[0] as? PlaybackState
                 provider?.player?.setPlaybackState(state)
             }
