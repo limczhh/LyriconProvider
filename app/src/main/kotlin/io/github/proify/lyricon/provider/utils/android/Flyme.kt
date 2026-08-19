@@ -57,6 +57,7 @@ object Flyme {
 
             fun hookSystemPropertiesGet(methodName: String, vararg paramTypes: Class<*>) {
                 val method = spClass.getDeclaredMethod(methodName, *paramTypes)
+                module.deoptimize(method)
                 unhooks += module.hook(method).intercept { chain ->
                     val key = chain.getArg(0) as? String
                     val spoofed = key?.let { spoofMap[it] }
@@ -68,6 +69,7 @@ object Flyme {
             hookSystemPropertiesGet("get", String::class.java, String::class.java)
 
             val getFieldMethod = Class::class.java.getDeclaredMethod("getField", String::class.java)
+            module.deoptimize(getFieldMethod)
             unhooks += module.hook(getFieldMethod).intercept { chain ->
                 val name = chain.getArg(0) as? String
                 when (name) {
@@ -78,6 +80,7 @@ object Flyme {
             }
 
             val getDeclaredFieldMethod = Class::class.java.getDeclaredMethod("getDeclaredField", String::class.java)
+            module.deoptimize(getDeclaredFieldMethod)
             unhooks += module.hook(getDeclaredFieldMethod).intercept { chain ->
                 val name = chain.getArg(0) as? String
                 when (name) {
