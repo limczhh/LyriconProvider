@@ -104,14 +104,16 @@ object QQMusicHD : BaseHooker() {
             }
 
         // ========== Hook MediaSession 同步播放状态与元数据 ==========
-        MediaSession::class.java.getDeclaredMethod("setPlaybackState", PlaybackState::class.java)
-            .hookAfter {
+        val setPlaybackStateMethod = MediaSession::class.java.getDeclaredMethod("setPlaybackState", PlaybackState::class.java)
+        module.deoptimize(setPlaybackStateMethod)
+        setPlaybackStateMethod.hookAfter {
                 val state = args[0] as? PlaybackState
                 provider?.player?.setPlaybackState(state)
             }
 
-        MediaSession::class.java.getDeclaredMethod("setMetadata", MediaMetadata::class.java)
-            .hookAfter {
+        val setMetadataMethod = MediaSession::class.java.getDeclaredMethod("setMetadata", MediaMetadata::class.java)
+        module.deoptimize(setMetadataMethod)
+        setMetadataMethod.hookAfter {
                 val metadata = args[0] as? MediaMetadata
                 metadata?.let { processMetadata(it) }
             }
