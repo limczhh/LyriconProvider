@@ -14,6 +14,7 @@ object SystemUIHooker : BaseHooker() {
         try {
             val targetClass = Class.forName(targetClassName, false, appClassLoader)
             val onCreateMethod = targetClass.getDeclaredMethod("onCreate")
+            module.deoptimize(onCreateMethod)
             module.hook(onCreateMethod).intercept { chain ->
                 chain.proceed()
                 val app = chain.thisObject as? Application

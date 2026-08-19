@@ -33,8 +33,9 @@ abstract class BaseHooker {
         try {
             val appClass = Class.forName("android.app.Application", false, appClassLoader)
             val method = appClass.getDeclaredMethod("attachBaseContext", Context::class.java)
+            module.deoptimize(method)
             module.hook(method).intercept { chain ->
-                _appContext = chain.getArg(0) as Context
+                _appContext = chain.thisObject as Context // thisObject is Application
                 chain.proceed()
             }
         } catch (e: Exception) {
@@ -120,6 +121,7 @@ abstract class BaseHooker {
         try {
             val targetClass = Class.forName(targetClassName, false, appClassLoader)
             val onCreateMethod = targetClass.getDeclaredMethod("onCreate")
+            module.deoptimize(onCreateMethod)
             module.hook(onCreateMethod).intercept { chain ->
                 chain.proceed()
                 (chain.thisObject as? Application)?.let { block(it) }
@@ -128,6 +130,7 @@ abstract class BaseHooker {
             Log.w(TAG, "Failed to hook $targetClassName.onCreate, fallback to Application", e)
             try {
                 val onCreateMethod = Application::class.java.getDeclaredMethod("onCreate")
+                module.deoptimize(onCreateMethod)
                 module.hook(onCreateMethod).intercept { chain ->
                     chain.proceed()
                     (chain.thisObject as? Application)?.let { block(it) }
