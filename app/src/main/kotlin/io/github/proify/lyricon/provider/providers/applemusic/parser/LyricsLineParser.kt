@@ -44,7 +44,6 @@ object LyricsLineParser {
         line.htmlPronunciationBackgroundVocalsLineText =
             callMethod(o, "getHtmlPronunciationBackgroundVocalsLineText") as? String
 
-        //ObjectUtils.print(o, prefix = arrayOf("get"))
         return line
     }
 }

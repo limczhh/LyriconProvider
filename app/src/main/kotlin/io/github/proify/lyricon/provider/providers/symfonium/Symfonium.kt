@@ -86,6 +86,13 @@ class Symfonium : BaseHooker() {
         lyriconProvider?.player?.setSong(song)
     }
 
+    private fun clearSong() {
+        currentMediaUri = null
+        currentMediaMetadata = null
+        currentSong = null
+        lyriconProvider?.player?.setSong(null)
+    }
+
     private fun fetchLyricFromTag(uri: Uri): String? = try {
         appContext?.contentResolver?.openFileDescriptor(uri, "r")?.use { pfd ->
             TagLib.getMetadata(pfd.dup().detachFd())?.let { metadata ->
@@ -122,7 +129,10 @@ class Symfonium : BaseHooker() {
         val setMetadataMethod = mediaSessionClass.getDeclaredMethod("setMetadata", MediaMetadata::class.java)
         module.deoptimize(setMetadataMethod)
         setMetadataMethod.hookAfter {
-                val metadata = args[0] as? MediaMetadata ?: return@hookAfter
+                val metadata = args[0] as? MediaMetadata ?: run {
+                    clearSong()
+                    return@hookAfter
+                }
                 if (metadata == currentMediaMetadata) {
                     // Log.d(TAG, "skip same metadata")
                     return@hookAfter

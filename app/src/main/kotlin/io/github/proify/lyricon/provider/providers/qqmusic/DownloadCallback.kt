@@ -6,9 +6,11 @@
 
 package io.github.proify.lyricon.provider.providers.qqmusic
 
-import io.github.proify.lyricon.provider.parsers.qrckit.LyricResponse
-
-interface DownloadCallback {
-    fun onDownloadFinished(response: LyricResponse)
+internal interface DownloadCallback {
+    fun onDownloadFinished(
+        id: String,
+        metadata: QQMusicApi.SongMetadata,
+        result: QQMusicApi.LyricData?
+    )
     fun onDownloadFailed(id: String, e: Exception)
 }

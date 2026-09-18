@@ -51,13 +51,10 @@ open class KuWo(val tag: String = "KuWoProvider") : BaseHooker() {
         val setMetadata = sessionClass.getDeclaredMethod("setMetadata", MediaMetadata::class.java)
         module.deoptimize(setMetadata)
         setMetadata.hookAfter {
-            val metadata = args[0] as? MediaMetadata ?: return@hookAfter
-            val title = metadata.getString(MediaMetadata.METADATA_KEY_TITLE)
-            if (!title.isNullOrBlank()) {
-                lyriconProvider?.player?.sendText(title)
-            } else {
-                lyriconProvider?.player?.sendText(null)
-            }
+            val title = (args[0] as? MediaMetadata)
+                ?.getString(MediaMetadata.METADATA_KEY_TITLE)
+                ?.takeIf { it.isNotBlank() }
+            lyriconProvider?.player?.sendText(title)
         }
     }
 }

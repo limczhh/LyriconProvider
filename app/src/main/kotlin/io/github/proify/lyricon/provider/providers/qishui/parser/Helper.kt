@@ -1,32 +1,27 @@
 package io.github.proify.lyricon.provider.providers.qishui.parser
 
+import io.github.proify.lyricon.lyric.model.RichLyricLine
+import io.github.proify.lyricon.lyric.model.LyricLine
+import io.github.proify.lyricon.lyric.model.extensions.normalize
 import io.github.proify.lyricon.provider.parsers.lrckit.LrcParser
 import io.github.proify.lyricon.provider.utils.extensions.findClosest
-import io.github.proify.lyricon.lyric.model.LyricLine
-import io.github.proify.lyricon.lyric.model.RichLyricLine
-import io.github.proify.lyricon.lyric.model.extensions.normalize
 import java.util.Locale
 
 fun NetResponseCache.toRichLyric(): List<RichLyricLine> {
-    val lines = parserTypeLyric(lyric?.type, lyric?.content)?.normalize()
-    if (lines.isNullOrEmpty()) return emptyList()
-
-    val langKey = lyric?.lang_translations?.keys?.let { getLangKeyForTranslations(it) }
+    val primary = parserTypeLyric(lyric?.type, lyric?.content) ?: return emptyList()
+    val langKey = lyric?.lang_translations?.keys?.let(::selectTranslationKey)
     val translation = lyric?.lang_translations?.get(langKey.orEmpty())
-    val translationLines = parserTypeLyric(translation?.type, translation?.content)?.normalize()
+    return mergeTranslation(primary, parserTypeLyric(translation?.type, translation?.content))
+}
 
-    return lines.map { line ->
-        val translation = translationLines?.findClosest(line.begin, 50)?.text
-
-        RichLyricLine(
-            begin = line.begin,
-            end = line.end,
-            duration = line.duration,
-            text = line.text,
-            words = line.words,
-            translation = if (translation == line.text) null else translation
-        )
-    }
+internal fun parseTypedLines(
+    type: String?,
+    lyric: String?,
+    translationType: String? = null,
+    translation: String? = null
+): List<RichLyricLine>? {
+    val primary = parserTypeLyric(type, lyric) ?: return null
+    return mergeTranslation(primary, parserTypeLyric(translationType, translation))
 }
 
 private fun parserTypeLyric(type: String?, lyric: String?): List<LyricLine>? {
@@ -35,13 +30,32 @@ private fun parserTypeLyric(type: String?, lyric: String?): List<LyricLine>? {
         "krc" -> KtvLyricParser.parse(lyric)
         "lrc" -> LrcParser.parse(lyric).lines
         else -> null
+    }?.normalize()
+}
+
+private fun mergeTranslation(
+    primary: List<LyricLine>,
+    translation: List<LyricLine>?
+): List<RichLyricLine> {
+    return primary.map { line ->
+        val translated = translation?.findClosest(line.begin, 50L)?.text
+        RichLyricLine(
+            begin = line.begin,
+            end = line.end,
+            duration = line.duration,
+            text = line.text,
+            words = line.words,
+            translation = translated?.takeUnless {
+                it.trim() == "//" || it == line.text
+            }
+        )
     }
 }
 
 /**
  * 根据系统语言匹配 lang_translations 中的 key
  */
-private fun getLangKeyForTranslations(availableKeys: Set<String>): String? {
+internal fun selectTranslationKey(availableKeys: Set<String>): String? {
     val locale = Locale.getDefault()
     val systemTag = buildString {
         append(locale.language.uppercase())
@@ -62,5 +76,9 @@ private fun getLangKeyForTranslations(availableKeys: Set<String>): String? {
     }
 
     // 模糊匹配语言部分
-    return availableKeys.firstOrNull { it.startsWith(locale.language, ignoreCase = true) }
+    availableKeys.firstOrNull { it.startsWith(locale.language, ignoreCase = true) }
+        ?.let { return it }
+
+    // 参照汽水自身的回退策略：没有系统语言时仍使用第一条可用翻译。
+    return availableKeys.firstOrNull()
 }

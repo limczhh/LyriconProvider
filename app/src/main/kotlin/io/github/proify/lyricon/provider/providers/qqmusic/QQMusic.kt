@@ -16,13 +16,11 @@ import android.media.session.PlaybackState
 import android.util.Log
 import androidx.core.content.ContextCompat
 import io.github.proify.lyricon.provider.BaseHooker
-import io.github.proify.lyricon.lyric.model.RichLyricLine
 import io.github.proify.lyricon.lyric.model.Song
 import io.github.proify.lyricon.lyric.model.lyricMetadataOf
 import io.github.proify.lyricon.provider.LyriconFactory
 import io.github.proify.lyricon.provider.LyriconProvider
 import io.github.proify.lyricon.provider.ProviderLogo
-import io.github.proify.lyricon.provider.parsers.qrckit.LyricResponse
 
 object QQMusic : BaseHooker() {
 
@@ -100,16 +98,14 @@ object QQMusic : BaseHooker() {
             val setMetadataMethod = sessionClass.getDeclaredMethod("setMetadata", MediaMetadata::class.java)
             QQMusic.module.deoptimize(setMetadataMethod)
             setMetadataMethod.hookAfter {
-                val metadata = args[0] as? MediaMetadata ?: return@hookAfter
-                val mediaId = metadata.getString(MediaMetadata.METADATA_KEY_MEDIA_ID)
-                    ?: return@hookAfter
-
-                if (mediaId.isBlank() || mediaId == currentMediaId) return@hookAfter
-
-                currentMediaId = mediaId
-                MediaMetadataCache.save(metadata)
-                refreshActiveSong()
+                val metadata = args[0] as? MediaMetadata ?: run {
+                    clearCurrentSong()
+                    return@hookAfter
+                }
+                MediaMetadataCache.save(metadata)?.let { handleMetadata(it) }
             }
+
+            hookCompatMediaSession(loader)
         }
 
         private fun registerSettingsReceiver(application: Application) {
@@ -152,12 +148,12 @@ object QQMusic : BaseHooker() {
         private fun refreshActiveSong() {
             val mediaId = currentMediaId ?: return
 
-            if (DiskSongCache.isCached(mediaId)) {
-                updateLyriconSong(DiskSongCache.get(mediaId))
-            } else {
-                updateSongWithPlaceholder(mediaId)
+            DiskSongCache.get(mediaId)?.let { cachedSong ->
+                updateLyriconSong(cachedSong)
+                return
             }
 
+            updateSongWithPlaceholder(mediaId)
             DownloadManager.download(mediaId, this)
         }
 
@@ -178,12 +174,60 @@ object QQMusic : BaseHooker() {
             lyriconProvider?.player?.setSong(song)
         }
 
-        override fun onDownloadFinished(response: LyricResponse) {
-            val song = response.toLyriconSong()
+        override fun onDownloadFinished(
+            id: String,
+            metadata: QQMusicApi.SongMetadata,
+            result: QQMusicApi.LyricData?
+        ) {
+            val song = Song(
+                id = id,
+                name = metadata.songName,
+                artist = metadata.artist,
+                duration = MediaMetadataCache.get(id)?.duration ?: 0L,
+                lyrics = result?.lines
+            )
             DiskSongCache.put(song)
 
-            if (response.id == currentMediaId) {
+            if (id == currentMediaId) {
                 updateLyriconSong(song)
+            }
+        }
+
+        private fun handleMetadata(data: Metadata) {
+            if (data.id == currentMediaId) return
+            currentMediaId = data.id
+            refreshActiveSong()
+        }
+
+        private fun hookCompatMediaSession(loader: ClassLoader) {
+            runCatching {
+                val metadataClass = Class.forName(
+                    "android.support.v4.media.MediaMetadataCompat",
+                    false,
+                    loader
+                )
+                val sessionClass = Class.forName(
+                    "android.support.v4.media.session.MediaSessionCompat",
+                    false,
+                    loader
+                )
+                val setMetadata = sessionClass.getDeclaredMethod("setMetadata", metadataClass)
+                val bundleField = metadataClass.getDeclaredField("mBundle").apply {
+                    isAccessible = true
+                }
+                QQMusic.module.deoptimize(setMetadata)
+                setMetadata.hookAfter {
+                    val compatMetadata = args[0] ?: run {
+                        clearCurrentSong()
+                        return@hookAfter
+                    }
+                    val bundle = bundleField.get(compatMetadata) as? android.os.Bundle
+                        ?: return@hookAfter
+                    MediaMetadataCache.save(bundle)?.let { handleMetadata(it) }
+                }
+                Log.i(TAG, "Hooked MediaSessionCompat.setMetadata()")
+            }.onFailure {
+                Log.d(TAG, "MediaSessionCompat unavailable")
             }
         }
 
@@ -191,20 +235,10 @@ object QQMusic : BaseHooker() {
             Log.e(TAG, "Lyric download failed for $id", e)
         }
 
-        private fun LyricResponse.toLyriconSong(): Song {
-            val cachedMetadata = MediaMetadataCache.get(id)
-            val lyrics = parsedLyric.richLyricLines.removeInvalidTranslation()
-            return Song(
-                id = id,
-                name = cachedMetadata?.title,
-                artist = cachedMetadata?.artist,
-                duration = cachedMetadata?.duration ?: 0,
-                lyrics = lyrics
-            )
+        private fun clearCurrentSong() {
+            currentMediaId = null
+            lyriconProvider?.player?.setSong(null)
         }
 
-        fun List<RichLyricLine>.removeInvalidTranslation() = apply {
-            forEach { if (it.translation?.trim() == "//") it.translation = null }
-        }
     }
 }

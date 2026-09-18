@@ -12,12 +12,11 @@ import android.media.session.MediaSession
 import android.media.session.PlaybackState
 import android.util.Log
 import io.github.proify.lyricon.provider.BaseHooker
-import io.github.proify.lyricon.lyric.model.RichLyricLine
 import io.github.proify.lyricon.lyric.model.Song
 import io.github.proify.lyricon.provider.LyriconFactory
 import io.github.proify.lyricon.provider.LyriconProvider
 import io.github.proify.lyricon.provider.ProviderLogo
-import io.github.proify.lyricon.provider.parsers.qrckit.QrcDownloader
+import io.github.proify.lyricon.provider.providers.qqmusic.QQMusicApi
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -114,8 +113,12 @@ object QQMusicHD : BaseHooker() {
         val setMetadataMethod = MediaSession::class.java.getDeclaredMethod("setMetadata", MediaMetadata::class.java)
         module.deoptimize(setMetadataMethod)
         setMetadataMethod.hookAfter {
-                val metadata = args[0] as? MediaMetadata
-                metadata?.let { processMetadata(it) }
+            val metadata = args[0] as? MediaMetadata
+            if (metadata == null) {
+                clearCurrentSong()
+            } else {
+                processMetadata(metadata)
+            }
             }
     }
 
@@ -145,16 +148,18 @@ object QQMusicHD : BaseHooker() {
 
         internalScope.launch {
             try {
-                val qrcResult = QrcDownloader.downloadLyrics(songId)
-                val richLyrics = qrcResult.parsedLyric.richLyricLines.filterInvalidTranslation()
+                val apiMetadata = QQMusicApi.fetchSongMetadata(songId)
+                    ?: throw IllegalStateException("QQ Music HD metadata not found: $songId")
+                val result = QQMusicApi.fetchLyric(songId)
+                val fullSong = initialSong.copy(
+                    name = apiMetadata.songName,
+                    artist = apiMetadata.artist,
+                    lyrics = result?.lines
+                )
+                DiskSongCache.put(fullSong)
 
-                if (richLyrics.isNotEmpty()) {
-                    val fullSong = initialSong.copy(lyrics = richLyrics)
-                    DiskSongCache.put(fullSong)
-
-                    if (songId == currentSongId) {
-                        provider?.player?.setSong(fullSong)
-                    }
+                if (songId == currentSongId) {
+                    provider?.player?.setSong(fullSong)
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "QRC download failed for songId=$songId", e)
@@ -188,14 +193,10 @@ object QQMusicHD : BaseHooker() {
         this.provider = newProvider
     }
 
-    /**
-     * 过滤无效的翻译标记（如 "//"）
-     */
-    private fun List<RichLyricLine>.filterInvalidTranslation(): List<RichLyricLine> {
-        return this.onEach { line ->
-            if (line.translation?.trim() == "//") {
-                line.translation = null
-            }
-        }
+    private fun clearCurrentSong() {
+        currentSongId = null
+        pendingSongId = null
+        provider?.player?.setSong(null)
     }
+
 }

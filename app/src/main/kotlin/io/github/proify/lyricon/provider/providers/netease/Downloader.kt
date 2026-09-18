@@ -6,7 +6,6 @@
 
 package io.github.proify.lyricon.provider.providers.netease
 
-import io.github.proify.lyricon.provider.parsers.yrckit.download.YrcDownloader
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -17,14 +16,15 @@ object Downloader {
     private val downloadingIds = ConcurrentHashMap.newKeySet<Long>()
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
-    fun download(id: Long, downloadCallback: DownloadCallback) {
-        if (downloadingIds.contains(id)) return
-        downloadingIds.add(id)
+    internal fun download(id: Long, downloadCallback: DownloadCallback) {
+        if (!downloadingIds.add(id)) return
 
         scope.launch {
             try {
-                val response = YrcDownloader.fetchLyric(id)
-                downloadCallback.onDownloadFinished(id, response)
+                val metadata = NeteaseApi.fetchSongMetadata(id)
+                    ?: throw IllegalStateException("Netease metadata not found: $id")
+                val response = NeteaseApi.fetchLyric(id)
+                downloadCallback.onDownloadFinished(id, metadata, response)
             } catch (e: Exception) {
                 downloadCallback.onDownloadFailed(id, e)
             } finally {

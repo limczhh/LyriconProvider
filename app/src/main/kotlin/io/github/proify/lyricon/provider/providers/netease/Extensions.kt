@@ -6,11 +6,11 @@
 
 package io.github.proify.lyricon.provider.providers.netease
 
+import io.github.proify.lyricon.lyric.model.Song
+import io.github.proify.lyricon.lyric.model.RichLyricLine
 import io.github.proify.lyricon.provider.utils.extensions.findClosest
 import io.github.proify.lyricon.provider.parsers.lrckit.LrcParser
 import io.github.proify.lyricon.lyric.model.LyricLine
-import io.github.proify.lyricon.lyric.model.RichLyricLine
-import io.github.proify.lyricon.lyric.model.Song
 import io.github.proify.lyricon.provider.parsers.yrckit.YrcParser
 
 fun LocalLyricCache.toSong(): Song {
@@ -20,7 +20,8 @@ fun LocalLyricCache.toSong(): Song {
     return Song(id = musicId.toString()).apply {
         name = metadata?.title
         artist = metadata?.artist
-        duration = metadata?.duration ?: richLyricLines.last().end
+        duration = metadata?.duration?.takeIf { it > 0L }
+            ?: richLyricLines.maxOfOrNull { it.end } ?: 0L
         lyrics = richLyricLines
     }
 }
@@ -31,17 +32,15 @@ fun LocalLyricCache.toRichLines(): List<RichLyricLine> {
     val romas = parseRomaLines()
 
     return sourceLines.map { line ->
-        val matchTranslate = translates?.findClosest(line.begin, 1000)
-        val matchRoma = romas?.findClosest(line.begin, 1000)
-
         RichLyricLine(
             begin = line.begin,
             end = line.end,
             duration = line.duration,
             text = line.text,
             words = line.words,
-            translation = matchTranslate?.text,
-            roma = matchRoma?.text
+            translation = translates?.findClosest(line.begin, 1_000L)
+                ?.text.takeUnless { it?.trim() == "//" },
+            roma = romas?.findClosest(line.begin, 1_000L)?.text
         )
     }
 }

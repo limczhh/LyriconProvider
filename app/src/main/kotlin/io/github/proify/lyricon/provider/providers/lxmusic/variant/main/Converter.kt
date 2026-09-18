@@ -6,9 +6,9 @@
 
 package io.github.proify.lyricon.provider.providers.lxmusic.variant.main
 
-import io.github.proify.lyricon.provider.parsers.lrckit.EnhanceLrcParser
 import io.github.proify.lyricon.lyric.model.RichLyricLine
 import io.github.proify.lyricon.lyric.model.Song
+import io.github.proify.lyricon.provider.parsers.lrckit.EnhanceLrcParser
 import io.github.proify.lyricon.lyric.model.extensions.normalize
 
 object Converter {
@@ -25,20 +25,22 @@ object Converter {
     ): List<RichLyricLine> {
         val main = EnhanceLrcParser.parse(lyric).lines
         val transMap =
-            translation?.let { EnhanceLrcParser.parse(it).lines.associateBy { l -> l.begin } }
-        val romaMap = roma?.let { EnhanceLrcParser.parse(it).lines.associateBy { l -> l.begin } }
+            translation?.let { EnhanceLrcParser.parse(it).lines.associateBy { line -> line.begin } }
+        val romaMap = roma?.let { EnhanceLrcParser.parse(it).lines.associateBy { line -> line.begin } }
 
         return main
             .filter { !it.text.isNullOrBlank() }
-            .map { m ->
+            .map { line ->
                 RichLyricLine(
-                    text = m.text,
-                    begin = m.begin,
-                    end = m.end,
-                    duration = m.duration,
-                    translation = transMap?.get(m.begin)?.text.takeIf { it != "//" }, //移除QQ音乐无效翻译
-                    roma = romaMap?.get(m.begin)?.text
+                    text = line.text,
+                    begin = line.begin,
+                    end = line.end,
+                    duration = line.duration,
+                    words = line.words,
+                    translation = transMap?.get(line.begin)?.text.takeUnless { it == "//" },
+                    roma = romaMap?.get(line.begin)?.text
                 )
-            }.normalize()
+            }
+            .normalize()
     }
 }

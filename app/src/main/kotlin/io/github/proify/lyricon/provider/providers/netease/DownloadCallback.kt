@@ -8,7 +8,11 @@ package io.github.proify.lyricon.provider.providers.netease
 
 import io.github.proify.lyricon.provider.parsers.yrckit.download.response.LyricResponse
 
-interface DownloadCallback {
-    fun onDownloadFinished(id: Long, response: LyricResponse)
+internal interface DownloadCallback {
+    fun onDownloadFinished(
+        id: Long,
+        metadata: NeteaseApi.SongMetadata,
+        response: LyricResponse?
+    )
     fun onDownloadFailed(id: Long, e: Exception)
 }

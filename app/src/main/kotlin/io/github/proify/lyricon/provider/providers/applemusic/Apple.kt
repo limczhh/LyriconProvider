@@ -50,7 +50,7 @@ object Apple : BaseHooker() {
 
     private fun initApp(app: Application) {
         application = app
-        classLoader = appClassLoader ?: return
+        classLoader = appClassLoader
         PreferencesMonitor.initialize(application, module)
         PreferencesMonitor.listener = object : PreferencesMonitor.Listener {
             override fun onTranslationSelectedChanged(selected: Boolean) {
@@ -88,13 +88,6 @@ object Apple : BaseHooker() {
         hookExoMediaPlayer()
         hookMediaMetadataChange()
         hookLyricBuildMethod()
-
-//        Class.forName("com.apple.android.music.player.viewmodel.PlayerLyricsViewModel", false, classLoader)
-//            .findMethod("loadLyrics", Class.forName("com.apple.android.music.model.PlaybackItem", false, classLoader))
-//            .hookAfter {
-//                val arg = args[0] ?: return@hookAfter
-//                ObjectUtils.print(arg)
-//            }
     }
 
     // --- Hook 1: 歌曲切换监听 ---
@@ -102,7 +95,10 @@ object Apple : BaseHooker() {
         val method = findMediaMetadataChangeMethod() ?: return
 
         method.hookAfter {
-            val mediaMetadata = args[0] as? MediaMetadata ?: return@hookAfter
+            val mediaMetadata = args[0] as? MediaMetadata ?: run {
+                PlaybackManager.onSongChanged(null)
+                return@hookAfter
+            }
             val metadata = MediaMetadataCache.putAndGet(mediaMetadata) ?: return@hookAfter
 
             // 委托给 Manager 处理
@@ -140,7 +136,7 @@ object Apple : BaseHooker() {
         exoPlayerClass.declaredConstructors.forEach { constructor ->
             constructor.hookAfter {
                 exoMediaPlayerInstance = instanceOrNull
-                getPositionMethod = instanceClass?.getDeclaredMethod("getCurrentPosition")
+                getPositionMethod = instanceClass.getDeclaredMethod("getCurrentPosition")
             }
         }
 

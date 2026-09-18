@@ -7,35 +7,43 @@
 package io.github.proify.lyricon.provider.providers.spotify
 
 import android.media.MediaMetadata
-import kotlinx.serialization.Serializable
+import java.util.concurrent.ConcurrentHashMap
 
 object MetadataCache {
-    private val map = mutableMapOf<String, Metadata>()
+    private val map = ConcurrentHashMap<String, Metadata>()
 
     fun save(metadata: MediaMetadata): Metadata? {
-        val id = metadata.getString(MediaMetadata.METADATA_KEY_MEDIA_ID)?.run {
-            substringAfter("spotify:track:", "")
-        }
+        val rawId = metadata.getString(MediaMetadata.METADATA_KEY_MEDIA_ID)
+            ?.trim()
+            .orEmpty()
+            .ifBlank {
+                metadata.getLong(MediaMetadata.METADATA_KEY_MEDIA_ID)
+                    .takeIf { it > 0L }
+                    ?.toString()
+                    .orEmpty()
+            }
+        val id = rawId.substringAfter("spotify:track:", rawId).trim()
+            .takeIf { it.length == 22 && it.all(Char::isLetterOrDigit) }
         if (id.isNullOrBlank()) return null
-
-        if (map.containsKey(id)) return map[id]
 
         val title = metadata.getString(MediaMetadata.METADATA_KEY_TITLE)
         val artist = metadata.getString(MediaMetadata.METADATA_KEY_ARTIST)
         val duration = metadata.getLong(MediaMetadata.METADATA_KEY_DURATION)
-//        metadata.keySet().forEach {
-//            Log.d("MediaMetadataCache", "key: $it, value: ${metadata.getString(it)}")
-//        }
-
-        val data = Metadata(id, title, artist, if (duration == 0L) Long.MAX_VALUE else duration)
+        val previous = map[id]
+        val data = Metadata(
+            id = id,
+            title = title?.takeIf { it.isNotBlank() } ?: previous?.title,
+            artist = artist?.takeIf { it.isNotBlank() } ?: previous?.artist,
+            duration = duration.takeIf { it > 0L }
+                ?: previous?.duration
+                ?: Long.MAX_VALUE
+        )
         map[id] = data
         return data
     }
 
-    fun get(id: String): Metadata? = map[id]
 }
 
-@Serializable
 data class Metadata(
     val id: String,
     val title: String?,

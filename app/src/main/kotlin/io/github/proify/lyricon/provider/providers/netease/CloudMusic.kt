@@ -23,6 +23,7 @@ import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.json.encodeToStream
 import org.luckypray.dexkit.DexKitBridge
 import java.io.File
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * 网易云音乐模块主入口，根据进程名选择性启用歌词提供者钩子。
@@ -52,6 +53,7 @@ object CloudMusic : BaseHooker() {
         private var lyricProvider: LyriconProvider? = null
         private var lastSetSong: Song? = null
         private var currentMusicId: Long = 0
+        private val apiMetadata = ConcurrentHashMap<Long, NeteaseApi.SongMetadata>()
 
         private var dexKitBridge: DexKitBridge? = null
         private var preferencesMonitor: PreferencesMonitor? = null
@@ -130,13 +132,15 @@ object CloudMusic : BaseHooker() {
             val setMetadataMethod = sessionClass.getDeclaredMethod("setMetadata", MediaMetadata::class.java)
             module.deoptimize(setMetadataMethod)
             setMetadataMethod.hookAfter {
-                val metadata = args[0] as? MediaMetadata ?: return@hookAfter
+                val metadata = args[0] as? MediaMetadata ?: run {
+                    clearSong()
+                    return@hookAfter
+                }
                 val data = MediaMetadataCache.save(metadata) ?: return@hookAfter
-                if (currentMusicId == data.id) return@hookAfter
-
-                currentMusicId = data.id
-                onSongChanged(data)
+                handleMetadata(data)
             }
+
+            hookCompatMediaSession()
 
             val setPlaybackStateMethod = sessionClass.getDeclaredMethod("setPlaybackState", PlaybackState::class.java)
             module.deoptimize(setPlaybackStateMethod)
@@ -146,10 +150,54 @@ object CloudMusic : BaseHooker() {
             }
         }
 
+        private fun handleMetadata(data: Metadata) {
+            if (currentMusicId == data.id) return
+            currentMusicId = data.id
+            onSongChanged(data)
+        }
+
+        private fun hookCompatMediaSession() {
+            runCatching {
+                val metadataClass = Class.forName(
+                    "android.support.v4.media.MediaMetadataCompat",
+                    false,
+                    this@CloudMusic.appClassLoader
+                )
+                val sessionClass = Class.forName(
+                    "android.support.v4.media.session.MediaSessionCompat",
+                    false,
+                    this@CloudMusic.appClassLoader
+                )
+                val setMetadata = sessionClass.getDeclaredMethod("setMetadata", metadataClass)
+                val bundleField = metadataClass.getDeclaredField("mBundle").apply {
+                    isAccessible = true
+                }
+                module.deoptimize(setMetadata)
+                setMetadata.hookAfter {
+                    val compatMetadata = args[0] ?: run {
+                        clearSong()
+                        return@hookAfter
+                    }
+                    val bundle = bundleField.get(compatMetadata) as? android.os.Bundle
+                        ?: return@hookAfter
+                    val data = MediaMetadataCache.save(bundle) ?: return@hookAfter
+                    handleMetadata(data)
+                }
+                Log.i(TAG, "Hooked MediaSessionCompat.setMetadata()")
+            }.onFailure {
+                Log.d(TAG, "MediaSessionCompat unavailable")
+            }
+        }
+
         // ---------------------------------- 下载回调实现 ----------------------------------
 
-        override fun onDownloadFinished(id: Long, response: LyricResponse) {
+        override fun onDownloadFinished(
+            id: Long,
+            metadata: NeteaseApi.SongMetadata,
+            response: LyricResponse?
+        ) {
             Log.d(TAG, "Download finished: $id")
+            apiMetadata[id] = metadata
             writeToLocalLyricCache(id, response)
         }
 
@@ -163,33 +211,38 @@ object CloudMusic : BaseHooker() {
             File(Constants.getDownloadLyricDirectory(this@CloudMusic.appContext!!), id.toString())
 
         @OptIn(ExperimentalSerializationApi::class)
-        private fun writeToLocalLyricCache(id: Long, response: LyricResponse) {
+        private fun writeToLocalLyricCache(
+            id: Long,
+            response: LyricResponse?
+        ) {
             val outputFile = getDownloadLyricFile(id)
             val cacheEntry = LocalLyricCache(
                 musicId = id,
-                lrc = response.lrc?.lyric,
-                lrcTranslateLyric = response.tlyric?.lyric,
-                yrc = response.yrc?.lyric,
-                yrcTranslateLyric = response.ytlrc?.lyric,
-                pureMusic = response.pureMusic,
-                roma = response.romalrc?.lyric
+                lrc = response?.lrc?.lyric,
+                lrcTranslateLyric = response?.tlyric?.lyric,
+                yrc = response?.yrc?.lyric,
+                yrcTranslateLyric = response?.ytlrc?.lyric,
+                pureMusic = response?.pureMusic ?: true,
+                roma = response?.romalrc?.lyric
             )
 
             outputFile.outputStream().use { outputStream ->
                 json.encodeToStream(cacheEntry, outputStream)
             }
 
-            loadLyricFromFile(cacheSource = "network", id = id, cacheFile = outputFile)
+            if (id == currentMusicId) {
+                loadLyricFromFile(cacheSource = "network", id = id, cacheFile = outputFile)
+            }
         }
 
         /**
          * 从本地缓存文件加载并设置歌词。
          */
-        private fun loadLyricFromFile(cacheSource: String, id: Long, cacheFile: File) {
+        private fun loadLyricFromFile(cacheSource: String, id: Long, cacheFile: File): Boolean {
             Log.d(TAG, "Load lyric file: $cacheSource, file=$cacheFile")
 
-            val metadata = MediaMetadataCache.get(id) ?: return
-            loadAndSetSong(metadata, cacheFile)
+            val metadata = MediaMetadataCache.get(id) ?: return false
+            return loadAndSetSong(metadata, cacheFile)
         }
 
         // ---------------------------------- 歌曲变更处理 ----------------------------------
@@ -198,27 +251,28 @@ object CloudMusic : BaseHooker() {
             val newMusicId = metadata.id
 
             val localCacheFile = getDownloadLyricFile(newMusicId)
-            if (localCacheFile.exists()) {
-                loadLyricFromFile(
+            if (localCacheFile.exists() && loadLyricFromFile(
                     cacheSource = "localCache",
-                    id = currentMusicId,
+                    id = newMusicId,
                     cacheFile = localCacheFile
-                )
-            } else {
-                Downloader.download(newMusicId, this)
-            }
+                )) return
+
+            loadAndSetSong(metadata, null)
+            Downloader.download(newMusicId, this)
         }
 
         /**
          * 同步加载缓存文件并设置歌曲，若无有效歌词则回退到基本歌曲信息。
          */
-        private fun loadAndSetSong(metadata: Metadata, cacheFile: File?) {
+        private fun loadAndSetSong(metadata: Metadata, cacheFile: File?): Boolean {
             val id = metadata.id
+            val canonical = apiMetadata[id]
+            var cacheReadSuccessfully = cacheFile == null || !cacheFile.exists()
 
             var songToSet = Song(
                 id = id.toString(),
-                name = metadata.title,
-                artist = metadata.artist,
+                name = canonical?.songName ?: metadata.title,
+                artist = canonical?.artist ?: metadata.artist,
                 duration = metadata.duration
             )
 
@@ -227,6 +281,7 @@ object CloudMusic : BaseHooker() {
                     val cachedData = cacheFile.readText()
                     val cache = json.decodeFromString<LocalLyricCache>(cachedData)
                     val parsedSong = cache.toSong()
+                    cacheReadSuccessfully = true
 
                     if (!parsedSong.lyrics.isNullOrEmpty() && !cache.pureMusic) {
                         songToSet = parsedSong
@@ -237,12 +292,19 @@ object CloudMusic : BaseHooker() {
             }
 
             setSong(songToSet)
+            return cacheReadSuccessfully
         }
 
         private fun setSong(song: Song) {
             if (lastSetSong == song) return
             lastSetSong = song
             lyricProvider?.player?.setSong(song)
+        }
+
+        private fun clearSong() {
+            currentMusicId = 0L
+            lastSetSong = null
+            lyricProvider?.player?.setSong(null)
         }
     }
 }

@@ -7,26 +7,58 @@
 package io.github.proify.lyricon.provider.providers.qishui
 
 import android.media.MediaMetadata
-import kotlinx.serialization.Serializable
+import android.os.Bundle
+import java.util.concurrent.ConcurrentHashMap
 
 object MetadataCache {
-    private val map = mutableMapOf<String, Metadata>()
+    private val map = ConcurrentHashMap<String, Metadata>()
 
     fun save(metadata: MediaMetadata?): Metadata? {
         if (metadata == null) return null
         val id = metadata.getString(MediaMetadata.METADATA_KEY_MEDIA_ID)
-        if (id.isNullOrBlank()) return null
+            ?.takeIf { it.isNotBlank() }
+            ?: metadata.getLong(MediaMetadata.METADATA_KEY_MEDIA_ID)
+                .takeIf { it > 0L }
+                ?.toString()
+            ?: return null
 
-        if (map.containsKey(id)) return map[id]
+        return save(
+            id = id,
+            title = metadata.getString(MediaMetadata.METADATA_KEY_TITLE),
+            artist = metadata.getString(MediaMetadata.METADATA_KEY_ARTIST),
+            duration = metadata.getLong(MediaMetadata.METADATA_KEY_DURATION)
+        )
+    }
 
-        val title = metadata.getString(MediaMetadata.METADATA_KEY_TITLE)
-        val artist = metadata.getString(MediaMetadata.METADATA_KEY_ARTIST)
-        val duration = metadata.getLong(MediaMetadata.METADATA_KEY_DURATION)
-//        metadata.keySet().forEach {
-//            Log.d("MediaMetadataCache", "key: $it, value: ${metadata.getString(it)}")
-//        }
+    fun save(bundle: Bundle): Metadata? {
+        val id = bundle.getCharSequence(MediaMetadata.METADATA_KEY_MEDIA_ID)
+            ?.toString()
+            ?.takeIf { it.isNotBlank() }
+            ?: bundle.getLong(MediaMetadata.METADATA_KEY_MEDIA_ID)
+                .takeIf { it > 0L }
+                ?.toString()
+            ?: return null
 
-        val data = Metadata(id, title, artist, if (duration == 0L) Long.MAX_VALUE else duration)
+        return save(
+            id = id,
+            title = bundle.getString(MediaMetadata.METADATA_KEY_TITLE),
+            artist = bundle.getString(MediaMetadata.METADATA_KEY_ARTIST),
+            duration = bundle.getLong(MediaMetadata.METADATA_KEY_DURATION)
+        )
+    }
+
+    private fun save(id: String, title: String?, artist: String?, duration: Long): Metadata? {
+        if (id.isBlank()) return null
+
+        val previous = map[id]
+        val data = Metadata(
+            id = id,
+            title = title?.takeIf { it.isNotBlank() } ?: previous?.title,
+            artist = artist?.takeIf { it.isNotBlank() } ?: previous?.artist,
+            duration = duration.takeIf { it > 0L }
+                ?: previous?.duration
+                ?: Long.MAX_VALUE
+        )
         map[id] = data
         return data
     }
@@ -34,7 +66,6 @@ object MetadataCache {
     fun get(id: String): Metadata? = map[id]
 }
 
-@Serializable
 data class Metadata(
     val id: String,
     val title: String?,

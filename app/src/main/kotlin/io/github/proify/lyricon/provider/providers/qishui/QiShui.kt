@@ -2,13 +2,17 @@ package io.github.proify.lyricon.provider.providers.qishui
 
 import android.media.MediaMetadata
 import android.media.session.PlaybackState
+import android.os.Bundle
 import android.util.Log
+import io.github.proify.lyricon.lyric.model.RichLyricLine
 import io.github.proify.lyricon.lyric.model.Song
 import io.github.proify.lyricon.provider.BaseHooker
 import io.github.proify.lyricon.provider.LyriconFactory
 import io.github.proify.lyricon.provider.LyriconProvider
 import io.github.proify.lyricon.provider.ProviderLogo
 import io.github.proify.lyricon.provider.providers.qishui.parser.NetResponseCache
+import io.github.proify.lyricon.provider.providers.qishui.parser.parseTypedLines
+import io.github.proify.lyricon.provider.providers.qishui.parser.selectTranslationKey
 import io.github.proify.lyricon.provider.providers.qishui.parser.toRichLyric
 import io.github.proify.lyricon.provider.utils.extensions.json
 import io.github.proify.lyricon.provider.utils.extensions.md5
@@ -32,13 +36,21 @@ object QiShui : BaseHooker() {
         val songId: String,
         val name: String,
         val artist: String,
-        val album: String = ""
+        val lyric: List<RichLyricLine>? = null,
+        val sourcePriority: Int
     )
+
+    private enum class CaptureSource(val priority: Int) {
+        PLAYABLE(1),
+        TRACK(2),
+        TRACK_RESPONSE(3)
+    }
 
     override fun onHook() {
         Log.i(TAG, "$packageName/$processName")
 
         hookRemoteControls()
+        hookTrackLyrics()
 
         onAppCreate {
             initProvider()
@@ -123,15 +135,161 @@ object QiShui : BaseHooker() {
     }
 
     private fun capturePlayable(playable: Any) {
+        invokeGetter(playable, "getTrack")?.let {
+            captureTrack(it, null, CaptureSource.TRACK)
+        }
+
         val songId = stringValue(invokeGetter(playable, "getPlayableId"))
         val songName = stringValue(invokeGetter(playable, "getName"))
         if (songId.isBlank() || songName.isBlank()) return
 
         val artist = joinNames(invokeGetter(playable, "getAuthorNames"))
             .ifBlank { stringValue(invokeGetter(playable, "getNotificationContent")) }
-        val album = stringValue(invokeGetter(playable, "getMediaSessionSubTitle"))
+        val lyricObject = invokeGetter(playable, "getLyric")
+            ?: invokeGetter(invokeGetter(playable, "getTrack"), "getTrackLyric")
+        storeCaptured(
+            CapturedTrack(
+                songId = songId,
+                name = songName,
+                artist = artist,
+                lyric = captureLyric(lyricObject),
+                sourcePriority = CaptureSource.PLAYABLE.priority
+            ),
+            CaptureSource.PLAYABLE
+        )
+    }
 
-        capturedMetadata[songId] = CapturedTrack(songId, songName, artist, album)
+    /** Capture the complete lyric after Qishui builds its TrackLyric object. */
+    private fun hookTrackLyrics() {
+        try {
+            val builderClass = Class.forName(
+                "com.luna.biz.playing.common.repo.track.builder.TrackLyricsBuilder",
+                false,
+                appClassLoader
+            )
+            val trackClass = Class.forName(
+                "com.luna.common.arch.db.entity.Track",
+                false,
+                appClassLoader
+            )
+            val responseClass = Class.forName(
+                "com.luna.biz.playing.common.repo.track.net.GetTrackResponse",
+                false,
+                appClassLoader
+            )
+            val buildMethod = builderClass.declaredMethods.firstOrNull { method ->
+                method.parameterTypes.size == 2 &&
+                    method.parameterTypes[0] == trackClass &&
+                    method.parameterTypes[1] == responseClass &&
+                    method.returnType == Void.TYPE
+            } ?: throw NoSuchMethodException("TrackLyricsBuilder(Track, GetTrackResponse)")
+
+            module.deoptimize(buildMethod)
+            module.hook(buildMethod).intercept { chain ->
+                val result = chain.proceed()
+                runCatching {
+                    val track = chain.getArg(0)
+                    val responseLyric = invokeGetter(chain.getArg(1), "getLyric")
+                    captureTrack(track, responseLyric, CaptureSource.TRACK_RESPONSE)
+                }.onFailure { error ->
+                    Log.e(TAG, "Capture Track response failed", error)
+                }
+                result
+            }
+            Log.i(TAG, "Hooked TrackLyricsBuilder")
+        } catch (e: Exception) {
+            Log.e(TAG, "Hook TrackLyricsBuilder failed", e)
+        }
+    }
+
+    private fun captureTrack(
+        trackObject: Any?,
+        fallbackLyric: Any?,
+        source: CaptureSource
+    ) {
+        if (trackObject == null) return
+        val songId = stringValue(invokeGetter(trackObject, "getId"))
+        val songName = stringValue(invokeGetter(trackObject, "getName"))
+        if (songId.isBlank() || songName.isBlank()) return
+
+        val artist = joinNames(invokeGetter(trackObject, "getArtists"))
+        val lyricObject = invokeGetter(trackObject, "getTrackLyric") ?: fallbackLyric
+        storeCaptured(
+            CapturedTrack(
+                songId = songId,
+                name = songName,
+                artist = artist,
+                lyric = captureLyric(lyricObject),
+                sourcePriority = source.priority
+            ),
+            source
+        )
+    }
+
+    private fun storeCaptured(track: CapturedTrack, source: CaptureSource) {
+        val previous = capturedMetadata[track.songId]
+        val merged = previous?.let { old ->
+            val preferNew = track.sourcePriority >= old.sourcePriority
+            CapturedTrack(
+                songId = track.songId,
+                name = if (preferNew && track.name.isNotBlank()) track.name
+                else old.name.ifBlank { track.name },
+                artist = if (preferNew && track.artist.isNotBlank()) track.artist
+                else old.artist.ifBlank { track.artist },
+                lyric = when {
+                    track.lyric.isNullOrEmpty() -> old.lyric
+                    old.lyric.isNullOrEmpty() || preferNew -> track.lyric
+                    else -> old.lyric
+                },
+                sourcePriority = maxOf(track.sourcePriority, old.sourcePriority)
+            )
+        } ?: track
+        if (previous == merged) return
+        capturedMetadata[track.songId] = merged
+        Log.i(
+            TAG,
+            "Captured Qishui track: ${merged.name} - ${merged.artist} " +
+                "(source=$source, lyric=${merged.lyric != null})"
+        )
+        if (curMediaId == merged.songId && merged.lyric != null) updateSong()
+    }
+
+    private data class RawLyric(val type: String, val content: String)
+
+    private fun captureLyric(lyricObject: Any?): List<RichLyricLine>? {
+        val original = extractRawLyric(lyricObject) ?: return null
+        val translations = invokeGetter(lyricObject, "getLangTranslations") as? Map<*, *>
+        val translation = findAppTranslation(translations)
+        return parseTypedLines(
+            type = original.type,
+            lyric = original.content,
+            translationType = translation?.type,
+            translation = translation?.content
+        )?.takeIf { it.isNotEmpty() }
+    }
+
+    private fun extractRawLyric(value: Any?): RawLyric? {
+        if (value == null) return null
+        val content = stringValue(invokeGetter(value, "getLyric"))
+            .ifBlank { stringValue(invokeGetter(value, "getContent")) }
+        if (content.isBlank()) return null
+        val typeObject = invokeGetter(value, "getType") ?: return null
+        val type = stringValue(invokeGetter(typeObject, "getValue"))
+            .ifBlank { stringValue(typeObject) }
+        if (type.isBlank()) return null
+        return RawLyric(type, content)
+    }
+
+    private fun findAppTranslation(translations: Map<*, *>?): RawLyric? {
+        if (translations.isNullOrEmpty()) return null
+        val candidates = translations.entries.mapNotNull { entry ->
+            val key = stringValue(invokeGetter(entry.key, "getValue"))
+                .ifBlank { stringValue(entry.key) }
+            val lyric = extractRawLyric(entry.value)
+            if (key.isBlank() || lyric == null) null else key to lyric
+        }.toMap()
+        val key = selectTranslationKey(candidates.keys) ?: return null
+        return candidates[key]
     }
 
     // ========================= Provider Init =========================
@@ -167,14 +325,64 @@ object QiShui : BaseHooker() {
         val setMetadata = sessionClass.getDeclaredMethod("setMetadata", MediaMetadata::class.java)
         module.deoptimize(setMetadata)
         setMetadata.hookAfter {
-            val mediaMetadata = args[0] as? MediaMetadata ?: return@hookAfter
-            val id = mediaMetadata.getString(MediaMetadata.METADATA_KEY_MEDIA_ID)
+            val mediaMetadata = args[0] as? MediaMetadata
+            if (mediaMetadata == null) {
+                handleMetadata(null)
+            } else {
+                MetadataCache.save(mediaMetadata)?.let { handleMetadata(it.id) }
+                    ?: handleMetadata(null)
+            }
+        }
 
-            if (curMediaId == id) return@hookAfter
+        hookCompatMediaSession()
+    }
 
-            curMediaId = id
-            MetadataCache.save(mediaMetadata)
-            updateSong()
+    private fun handleMetadata(id: String?) {
+        if (id.isNullOrBlank()) {
+            curMediaId = null
+            lastSong = null
+            provider?.player?.setSong(null)
+            return
+        }
+        if (curMediaId == id) return
+        curMediaId = id
+        updateSong()
+    }
+
+    private fun hookCompatMediaSession() {
+        runCatching {
+            val metadataClass = Class.forName(
+                "android.support.v4.media.MediaMetadataCompat",
+                false,
+                appClassLoader
+            )
+            val sessionClass = Class.forName(
+                "android.support.v4.media.session.MediaSessionCompat",
+                false,
+                appClassLoader
+            )
+            val setMetadata = sessionClass.getDeclaredMethod("setMetadata", metadataClass)
+            val bundleField = metadataClass.getDeclaredField("mBundle").apply {
+                isAccessible = true
+            }
+            module.deoptimize(setMetadata)
+            setMetadata.hookAfter {
+                val compatMetadata = args[0]
+                if (compatMetadata == null) {
+                    handleMetadata(null)
+                } else {
+                    val bundle = bundleField.get(compatMetadata) as? Bundle
+                    if (bundle == null) {
+                        handleMetadata(null)
+                    } else {
+                        MetadataCache.save(bundle)?.let { handleMetadata(it.id) }
+                            ?: handleMetadata(null)
+                    }
+                }
+            }
+            Log.i(TAG, "Hooked MediaSessionCompat.setMetadata()")
+        }.onFailure {
+            Log.d(TAG, "MediaSessionCompat unavailable")
         }
     }
 
@@ -189,6 +397,23 @@ object QiShui : BaseHooker() {
     @OptIn(ExperimentalSerializationApi::class)
     fun updateSong() {
         val id = curMediaId ?: return
+        val captured = capturedMetadata[id]
+        val metadata = MetadataCache.get(id)
+
+        // The app-owned TrackLyric is authoritative; MediaMetadata and the
+        // disk cache are fallbacks because Bluetooth controls may rewrite them.
+        captured?.lyric?.takeIf { it.isNotEmpty() }?.let { lyric ->
+            setSong(
+                Song(
+                    id = id,
+                    name = captured.name,
+                    artist = captured.artist,
+                    duration = metadata?.duration ?: 0L,
+                    lyrics = lyric
+                )
+            )
+            return
+        }
 
         val cache = runCatching {
             val file = getNetLyricCacheFile(id)
@@ -202,11 +427,11 @@ object QiShui : BaseHooker() {
         }.getOrNull()
 
         if (cache == null) {
-            val captured = capturedMetadata[id]
-            val metadata = MetadataCache.get(id)
             setSong(Song(
+                id = id,
                 name = captured?.name ?: metadata?.title,
-                artist = captured?.artist ?: metadata?.artist
+                artist = captured?.artist ?: metadata?.artist,
+                duration = metadata?.duration ?: 0L
             ))
             return
         }
@@ -291,5 +516,16 @@ object QiShui : BaseHooker() {
         if (value is CharSequence) return value.toString().trim()
         return stringValue(invokeGetter(value, "getName"))
             .ifBlank { stringValue(invokeGetter(value, "getArtistName")) }
+            .ifBlank { stringField(value, "name") }
+    }
+
+    private fun stringField(target: Any, fieldName: String): String {
+        return runCatching {
+            target.javaClass.fields.firstOrNull { it.name == fieldName }
+                ?.get(target)
+                ?.toString()
+                ?.trim()
+                .orEmpty()
+        }.getOrDefault("")
     }
 }

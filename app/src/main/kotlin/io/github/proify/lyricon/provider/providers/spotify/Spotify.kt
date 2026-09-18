@@ -9,43 +9,33 @@ package io.github.proify.lyricon.provider.providers.spotify
 import android.media.MediaMetadata
 import android.media.session.PlaybackState
 import android.util.Log
-import io.github.proify.lyricon.provider.BaseHooker
-import io.github.proify.lyricon.provider.utils.extensions.toPairMap
 import io.github.proify.lyricon.lyric.model.Song
+import io.github.proify.lyricon.provider.BaseHooker
 import io.github.proify.lyricon.provider.LyriconFactory
 import io.github.proify.lyricon.provider.LyriconProvider
 import io.github.proify.lyricon.provider.ProviderLogo
-import io.github.proify.lyricon.provider.providers.spotify.api.NoFoundLyricException
-import io.github.proify.lyricon.provider.providers.spotify.api.SpotifyApi
-import io.github.proify.lyricon.provider.providers.spotify.api.SpotifyApi.jsonParser
-import io.github.proify.lyricon.provider.providers.spotify.api.response.LyricResponse
-import java.util.Locale
+import io.github.proify.lyricon.provider.parsers.lrckit.EnhanceLrcParser
+import io.github.proify.lyricon.provider.utils.extensions.toRichLyricLines
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
+import java.util.concurrent.ConcurrentHashMap
 
-object Spotify : BaseHooker(), DownloadCallback {
+/** Spotify provider using the public Spotify lyrics worker contract. */
+object Spotify : BaseHooker() {
     private const val TAG = "SpotifyProvider"
+    private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private val fetching = ConcurrentHashMap.newKeySet<String>()
+
     private var lyriconProvider: LyriconProvider? = null
     private var trackId: String? = null
     private var lastSong: Song? = null
 
     override fun onHook() {
-        Log.d(TAG, "正在注入进程: $processName")
-
+        Log.d(TAG, "Injecting process: $processName")
         onAppCreate { initProvider() }
         hookMediaSession()
-        hookOkHttp()
-    }
-
-    private fun hookOkHttp() {
-        val clazz = try { "okhttp3.Headers".toClass() } catch (_: ClassNotFoundException) { return }
-        clazz.declaredConstructors.first().hookAfter {
-            val arg = args[0] as? Array<*> ?: return@hookAfter
-            arg.toPairMap().forEach { (key, value) ->
-                val keyLowercase = key.lowercase(Locale.ENGLISH)
-                if (keyLowercase in SpotifyApi.keysRequired) {
-                    SpotifyApi.headers[keyLowercase] = value
-                }
-            }
-        }
     }
 
     private fun initProvider() {
@@ -66,7 +56,7 @@ object Spotify : BaseHooker(), DownloadCallback {
             .forEach { method ->
                 module.deoptimize(method)
                 method.hookAfter {
-                    val state = (args[0] as? PlaybackState) ?: return@hookAfter
+                    val state = args[0] as? PlaybackState ?: return@hookAfter
                     lyriconProvider?.player?.setPlaybackState(state)
                 }
             }
@@ -76,68 +66,67 @@ object Spotify : BaseHooker(), DownloadCallback {
             .forEach { method ->
                 module.deoptimize(method)
                 method.hookAfter {
-                    val metadata = args[0] as? MediaMetadata ?: return@hookAfter
-
+                    val metadata = args[0] as? MediaMetadata ?: run {
+                        trackId = null
+                        lastSong = null
+                        lyriconProvider?.player?.setSong(null)
+                        return@hookAfter
+                    }
                     val data = MetadataCache.save(metadata)
-
                     if (data == null) {
-
-                        //处理其它通知（比如广告）
                         val title = metadata.getString(MediaMetadata.METADATA_KEY_TITLE)
                         val artist = metadata.getString(MediaMetadata.METADATA_KEY_ARTIST)
-                        if (title.orEmpty().isNotBlank() || artist.orEmpty().isNotBlank()) {
-                            Log.i(TAG, "Invalid track info, using title and artist")
-                            setPlaceholder(title, artist)
+                        if (!title.isNullOrBlank() || !artist.isNullOrBlank()) {
+                            setSong(Song(name = title, artist = artist))
                         }
-
                         return@hookAfter
                     }
 
-                    val id = data.id
-                    if (id == this@Spotify.trackId) return@hookAfter
-                    this@Spotify.trackId = id
-
-                    onTrackIdChanged(data)
+                    val metadataChanged = lastSong?.let { song ->
+                        song.name != data.title ||
+                            song.artist != data.artist ||
+                            song.duration != data.duration
+                    } != false
+                    if (data.id == trackId && !metadataChanged) return@hookAfter
+                    trackId = data.id
+                    onTrackChanged(data)
                 }
             }
     }
 
-    private fun setPlaceholder(title: String?, artist: String?) {
-        setSong(Song(name = title, artist = artist))
-    }
-
-    private fun onTrackIdChanged(data: Metadata) {
-        val (id, title, artist) = data
-        val cache = appContext?.let { DiskCache.get(it, id) }
-        if (cache != null) {
-            applyResponse(id, cache)
+    private fun onTrackChanged(data: Metadata) {
+        val cached = appContext?.let { DiskCache.get(it, data.id) }
+            ?.takeUnless { it.trimStart().startsWith("{") }
+        if (cached != null) {
+            applyLyric(data, cached)
             return
         }
 
-        setPlaceholder(title, artist)
-        Downloader.download(id, this)
-    }
-
-    override fun onDownloadFinished(id: String, response: String) {
-        applyResponse(id, response)
-        appContext?.let { DiskCache.put(it, id, response) }
-    }
-
-    private fun applyResponse(id: String, response: String) {
-        val lyricResponse =
-            runCatching { jsonParser.decodeFromString<LyricResponse>(response) }.getOrNull()
-        if (lyricResponse != null) {
-            val song = lyricResponse.toSong(id)
-            if (song != lastSong) setSong(song)
+        setSong(Song(id = data.id, name = data.title, artist = data.artist))
+        if (!fetching.add(data.id)) return
+        scope.launch {
+            try {
+                val lyric = SpotifyLyricsApi.fetchLyrics(data.id) ?: return@launch
+                appContext?.let { DiskCache.put(it, data.id, lyric) }
+                if (trackId == data.id) applyLyric(data, lyric)
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to fetch lyric for ${data.id}", e)
+            } finally {
+                fetching.remove(data.id)
+            }
         }
     }
 
-    override fun onDownloadFailed(id: String, e: Exception) {
-        if (e is NoFoundLyricException) {
-            Log.d(TAG, e.message ?: "No lyric found")
-        } else {
-            Log.e(TAG, "Failed to fetch lyric for $id", e)
-        }
+    private fun applyLyric(data: Metadata, lyric: String) {
+        val lines = EnhanceLrcParser.parse(lyric, data.duration).lines.toRichLyricLines()
+        val song = Song(
+            id = data.id,
+            name = data.title,
+            artist = data.artist,
+            duration = data.duration,
+            lyrics = lines
+        )
+        if (song != lastSong) setSong(song)
     }
 
     private fun setSong(song: Song) {

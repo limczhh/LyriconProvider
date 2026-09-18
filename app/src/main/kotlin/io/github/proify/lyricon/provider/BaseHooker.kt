@@ -98,6 +98,7 @@ abstract class BaseHooker {
         try {
             val targetClass = Class.forName(targetClassName, false, appClassLoader)
             val onCreateMethod = targetClass.getDeclaredMethod("onCreate")
+            module.deoptimize(onCreateMethod)
             module.hook(onCreateMethod).intercept { chain ->
                 chain.proceed()
                 block()
@@ -106,6 +107,7 @@ abstract class BaseHooker {
             Log.w(TAG, "Failed to hook $targetClassName.onCreate, fallback to Application", e)
             try {
                 val onCreateMethod = Application::class.java.getDeclaredMethod("onCreate")
+                module.deoptimize(onCreateMethod)
                 module.hook(onCreateMethod).intercept { chain ->
                     chain.proceed()
                     block()
