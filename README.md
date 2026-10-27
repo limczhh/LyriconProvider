@@ -12,6 +12,7 @@
 > - 移除了 cloud-provider、meizu-provider、car-provider 模块
 > - 魔改 PowerAmp Provider：移除设置页面，默认开启翻译，仅读取本地内嵌歌词
 > - Salt Player >= 2026081001 自动跳过 hook（已原生支持歌词）
+> - 新增 Melodist Provider，支持逐字歌词、翻译歌词与 OriginOS 伪装包名识别
 > - 统一项目结构，合并 parsers/utils 到单一模块内
 
 ![Platform](https://img.shields.io/badge/Platform-Android-brightgreen?style=flat&logo=android)
