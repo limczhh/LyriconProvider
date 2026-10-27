@@ -23,6 +23,7 @@ local.properties
 # Signing
 *.jks
 *.keystore
+release-signing.local.properties
 
 # Gradle daemon
 /gradle/gradle-daemon-jvm.properties

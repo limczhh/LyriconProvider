@@ -101,6 +101,11 @@ abstract class BaseHooker {
             module.deoptimize(onCreateMethod)
             module.hook(onCreateMethod).intercept { chain ->
                 chain.proceed()
+                // attachBaseContext 在部分 ROM / Xposed 实现上可能晚于模块加载，
+                // 这里用 Application 实例兜底，保证 appContext 可用。
+                if (_appContext == null) {
+                    _appContext = chain.thisObject as? Context
+                }
                 block()
             }
         } catch (e: Exception) {
@@ -110,6 +115,9 @@ abstract class BaseHooker {
                 module.deoptimize(onCreateMethod)
                 module.hook(onCreateMethod).intercept { chain ->
                     chain.proceed()
+                    if (_appContext == null) {
+                        _appContext = chain.thisObject as? Context
+                    }
                     block()
                 }
             } catch (e2: Exception) {
@@ -126,7 +134,11 @@ abstract class BaseHooker {
             module.deoptimize(onCreateMethod)
             module.hook(onCreateMethod).intercept { chain ->
                 chain.proceed()
-                (chain.thisObject as? Application)?.let { block(it) }
+                val app = chain.thisObject as? Application
+                if (_appContext == null) {
+                    _appContext = app
+                }
+                app?.let { block(it) }
             }
         } catch (e: Exception) {
             Log.w(TAG, "Failed to hook $targetClassName.onCreate, fallback to Application", e)
@@ -135,7 +147,11 @@ abstract class BaseHooker {
                 module.deoptimize(onCreateMethod)
                 module.hook(onCreateMethod).intercept { chain ->
                     chain.proceed()
-                    (chain.thisObject as? Application)?.let { block(it) }
+                    val app = chain.thisObject as? Application
+                    if (_appContext == null) {
+                        _appContext = app
+                    }
+                    app?.let { block(it) }
                 }
             } catch (e2: Exception) {
                 Log.e(TAG, "Failed to hook Application.onCreate (fallback)", e2)
