@@ -19,7 +19,7 @@
 
 ## 功能特性
 
-- **歌词提供** — 为 14 款音乐播放器提供逐字歌词和翻译支持
+- **歌词提供** — 为 15 款音乐播放器提供逐字歌词和翻译支持
 - **歌词分发** — 内置 Central Bridge，作为 System UI 的歌词 API 服务端
 - **一个 APK** — 同时承担歌词提供和分发，无需额外安装其他模块
 
@@ -30,6 +30,7 @@
 | **Apple Music** | `com.apple.android.music` | 支持逐字、翻译、背景人声、对唱格式歌词 |
 | **网易云音乐 / 荣耀版** | `com.netease.cloudmusic` / `com.hihonor.cloudmusic` | 支持逐字歌词、翻译歌词 |
 | **QQ 音乐** | `com.tencent.qqmusic` | 支持逐字歌词、翻译歌词 |
+| **Melodist** | `org.melodist.mobile` / `com.tencent.qqmusic`（OriginOS 版） | 支持逐字、翻译歌词（基于 QQ 音乐 QRC 补全，并兼容 ColorOS 标准歌词）；自动识别伪装 QQ 音乐包名的 OriginOS 版本 |
 | **QQ 音乐 HD** | `com.tencent.minihd.qqmusic` | 支持逐字歌词、翻译歌词 |
 | **LX 音乐** | `cn.toside.music.mobile` | 支持翻译歌词显示 |
 | **酷狗音乐 / 概念版** | `com.kugou.android` / `com.kugou.android.lite` | **需在 App 内开启车载歌词模式** |
