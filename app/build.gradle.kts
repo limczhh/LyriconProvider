@@ -25,7 +25,7 @@ configure<ApplicationExtension> {
         minSdk = 28
         targetSdk = (rootProject.extra.get("targetSdkVersion") as Int)
         versionCode = gitCommitCount
-        versionName = "1.0.0"
+        versionName = "1.1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

@@ -30,3 +30,6 @@ release-signing.local.properties
 
 # Temp workspace
 /temp
+
+# Locally collected release artifacts (uploaded through GitHub Releases)
+/APKs

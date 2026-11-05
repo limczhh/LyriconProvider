@@ -16,6 +16,7 @@ import io.github.proify.lyricon.provider.providers.lxmusic.variant.lxnetease.LxN
 import io.github.proify.lyricon.provider.providers.lxmusic.variant.main.LXMusic
 import io.github.proify.lyricon.provider.providers.musicfree.MusicFree
 import io.github.proify.lyricon.provider.providers.melodist.Melodist
+import io.github.proify.lyricon.provider.providers.musicone.MusicOne
 import io.github.proify.lyricon.provider.providers.netease.CloudMusic
 import io.github.proify.lyricon.provider.providers.poweramp.PowerAmp
 import io.github.proify.lyricon.provider.providers.qishui.QiShui
@@ -52,6 +53,7 @@ class HookEntry : XposedModule() {
             "com.hihonor.cloudmusic" -> CloudMusic
             "com.tencent.qqmusic" -> if (isMelodist(param)) Melodist else QQMusic
             "org.melodist.mobile" -> Melodist
+            "io.github.shuyunr.musicone" -> MusicOne
             "com.tencent.minihd.qqmusic" -> QQMusicHD
             "com.apple.android.music" -> Apple
             "com.kugou.android" -> KuGou()
