@@ -44,8 +44,6 @@ class HookEntry : XposedModule() {
             "onPackageLoaded pkg=${param.packageName} first=${param.isFirstPackage} " +
                 "process=$processName"
         )
-        if (!param.isFirstPackage) return
-
         val hooker = when (param.packageName) {
             "com.android.systemui" -> SystemUIHooker
             "com.netease.cloudmusic",
